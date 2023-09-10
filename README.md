@@ -1,5 +1,5 @@
-[![Rust](https://github.com/flopezlasanta/exchange-rs/actions/workflows/rust.yml/badge.svg)
-![Security](https://github.com/flopezlasanta/exchange-rs/actions/workflows/security.yml/badge.svg)
+![Rust](https://github.com/flopezlasanta/exchange-rs/actions/workflows/rust.yml/badge.svg)
+![Audit](https://github.com/flopezlasanta/exchange-rs/actions/workflows/audit.yml/badge.svg)
 
 ## exchange-rs
 
