@@ -10,7 +10,7 @@ init:
 # check code
 check:
     cargo check
-    cargo fmt
+    cargo fmt --all -- --check
     cargo clippy --all-targets --all-features
 
 # build project

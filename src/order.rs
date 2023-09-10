@@ -110,13 +110,13 @@ pub mod util {
     use rand::Rng;
 
     use super::{OrderRequest, OrderSide};
-    
-    pub const DEFAULT_PAIR: &'static str = "ETH/USDT";
+
+    pub const DEFAULT_PAIR: &str = "ETH/USDT";
 
     pub fn generate(range: impl Iterator<Item = usize>) -> impl Iterator<Item = OrderRequest> {
         let mut rng = rand::thread_rng();
 
-        let orders = range.map(move |i| {
+        range.map(move |i| {
             if rng.gen_bool(1.0 / 1000.0) {
                 OrderRequest::Cancel {
                     order_id: format_compact!("{}", rng.gen_range(1..=i as u64)),
@@ -135,8 +135,6 @@ pub mod util {
                     },
                 }
             }
-        });
-
-        orders
+        })
     }
 }
