@@ -9,7 +9,7 @@ use anyhow::Result;
 use clap::Parser;
 use compact_str::CompactString;
 use crossbeam_channel::unbounded;
-use exchange::{engine::Engine, order::DEFAULT_PAIR};
+use exchange::{engine::Engine, order::util::DEFAULT_PAIR};
 use tracing::{error, info};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_log::LogTracer;
