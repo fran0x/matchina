@@ -5,6 +5,8 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::trade::Trade;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "UPPERCASE", tag = "order_request")]
 pub enum OrderRequest {
@@ -28,9 +30,11 @@ pub enum OrderSide {
     Bid,
 }
 
-impl OrderSide {
+impl std::ops::Not for OrderSide {
+    type Output = OrderSide;
+
     #[inline]
-    fn _toggle(&self) -> Self {
+    fn not(self) -> Self::Output {
         match self {
             Self::Ask => Self::Bid,
             Self::Bid => Self::Ask,
@@ -49,11 +53,14 @@ impl OrderId {
     }
 }
 
+pub type OrderPrice = u64;
+pub type OrderQuantity = u64;
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "UPPERCASE", tag = "order_type")]
 pub enum OrderType {
     Limit {
-        limit_price: u64,
+        limit_price: OrderPrice,
         #[serde(default)]
         time_in_force: TimeInForce,
     },
@@ -102,15 +109,15 @@ pub struct Order {
     side: OrderSide,
     #[serde(flatten)]
     type_: OrderType,
-    total_quantity: u64,
+    order_quantity: OrderQuantity,
     #[serde(default)]
-    filled_quantity: u64,
+    filled_quantity: OrderQuantity,
     status: OrderStatus,
 }
 
 impl Order {
     #[inline]
-    fn id(&self) -> OrderId {
+    pub fn id(&self) -> OrderId {
         self.id
     }
 
@@ -120,7 +127,7 @@ impl Order {
     }
 
     #[inline]
-    fn limit_price(&self) -> Option<u64> {
+    pub fn limit_price(&self) -> Option<OrderPrice> {
         match self.type_ {
             OrderType::Limit { limit_price, .. } => Some(limit_price),
             _ => None,
@@ -128,8 +135,8 @@ impl Order {
     }
 
     #[inline]
-    fn remaining(&self) -> u64 {
-        self.total_quantity - self.filled_quantity
+    pub fn remaining(&self) -> OrderQuantity {
+        self.order_quantity - self.filled_quantity
     }
 
     #[inline]
@@ -180,7 +187,7 @@ impl Order {
     }
 
     #[inline]
-    fn matches(&self, order: &Self) -> bool {
+    pub fn matches(&self, order: &Self) -> bool {
         let (taker, maker) = (self, order);
 
         if taker.is_closed() || maker.is_closed() {
@@ -203,16 +210,16 @@ impl Order {
         }
     }
 
-    fn fill(&mut self, amount: u64) -> Result<(), OrderError> {
-        if amount > self.remaining() {
+    pub fn fill(&mut self, quantity: OrderQuantity) -> Result<(), OrderError> {
+        if quantity > self.remaining() {
             return Err(OrderError::Overfill {
-                fill: amount,
+                fill: quantity,
                 remaining: self.remaining(),
             });
         }
 
-        self.filled_quantity += amount;
-        self.status = if self.filled_quantity == self.total_quantity {
+        self.filled_quantity += quantity;
+        self.status = if self.filled_quantity == self.order_quantity {
             OrderStatus::Completed
         } else {
             OrderStatus::Partial
@@ -246,50 +253,10 @@ impl PartialOrd for Order {
 #[derive(Debug, Error)]
 pub enum OrderError {
     #[error("fill exceeds remaning amount (fill={}, remaining={})", .fill, .remaining)]
-    Overfill { fill: u64, remaining: u64 },
-}
-
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-pub struct Trade {
-    taker: OrderId,
-    maker: OrderId,
-    quantity: u64,
-    price: u64,
-}
-
-impl Trade {
-    #[inline]
-    pub fn new(taker: &mut Order, maker: &mut Order) -> Result<Trade, TradeError> {
-        if !taker.matches(maker) {
-            Err(TradeError::PriceNotMatching)?;
-        }
-
-        let traded = taker.remaining().min(maker.remaining());
-        let price = maker.limit_price().expect("maker must always have a price");
-
-        taker.fill(traded)?;
-        maker.fill(traded)?;
-
-        Ok(Trade {
-            taker: taker.id(),
-            maker: maker.id(),
-            quantity: traded,
-            price,
-        })
-    }
-
-    #[inline]
-    pub fn price(&self) -> u64 {
-        self.price
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum TradeError {
-    #[error("prices do not match each other")]
-    PriceNotMatching,
-    #[error("order error: {0}")]
-    OrderError(#[from] OrderError),
+    Overfill {
+        fill: OrderQuantity,
+        remaining: OrderQuantity,
+    },
 }
 
 pub mod util {
