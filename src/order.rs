@@ -42,17 +42,7 @@ impl std::ops::Not for OrderSide {
     }
 }
 
-#[repr(transparent)]
-#[derive(Clone, Copy, Debug, Hash, Serialize, Deserialize, PartialEq, Eq)]
-pub struct OrderId(u64);
-
-impl OrderId {
-    #[inline]
-    pub fn new(order_id: u64) -> Self {
-        Self(order_id)
-    }
-}
-
+pub type OrderId = u64;
 pub type OrderPrice = u64;
 pub type OrderQuantity = u64;
 
@@ -116,6 +106,21 @@ pub struct Order {
 }
 
 impl Order {
+    #[inline]
+    pub fn limit_order(id: OrderId, side: OrderSide, limit_price: OrderPrice, quantity: OrderQuantity) -> Self {
+        Self {
+            id,
+            side,
+            type_: OrderType::Limit {
+                limit_price,
+                time_in_force: Default::default(),
+            },
+            order_quantity: quantity,
+            filled_quantity: 0,
+            status: OrderStatus::Open,
+        }
+    }
+
     #[inline]
     pub fn id(&self) -> OrderId {
         self.id
