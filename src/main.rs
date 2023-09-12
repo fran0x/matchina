@@ -133,6 +133,7 @@ fn init_logs() -> WorkerGuard {
     let (non_blocking_writer, guard) = tracing_appender::non_blocking(std::io::stdout());
     let stdout_layer = fmt::layer()
         .json()
+        .with_thread_names(true)
         .with_writer(non_blocking_writer)
         .with_filter(EnvFilter::from_default_env());
 

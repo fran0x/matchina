@@ -1,6 +1,25 @@
+use std::cmp::Ordering;
+
 use compact_str::CompactString;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "UPPERCASE", tag = "order_request")]
+pub enum OrderRequest {
+    Create {
+        account_id: CompactString,
+        order_id: CompactString,
+        pair: CompactString,
+        quantity: Decimal,
+        price: Decimal,
+        side: OrderSide,
+    },
+    Cancel {
+        order_id: CompactString,
+    },
+}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "UPPERCASE")]
@@ -17,22 +36,6 @@ impl OrderSide {
             Self::Bid => Self::Ask,
         }
     }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "UPPERCASE", tag = "order_request")]
-pub enum OrderRequest {
-    Create {
-        account_id: CompactString,
-        order_id: CompactString,
-        pair: CompactString,
-        quantity: Decimal,
-        price: Decimal,
-        side: OrderSide,
-    },
-    Cancel {
-        order_id: CompactString,
-    },
 }
 
 #[repr(transparent)]
@@ -99,10 +102,194 @@ pub struct Order {
     side: OrderSide,
     #[serde(flatten)]
     type_: OrderType,
-    quantity: u64,
+    total_quantity: u64,
     #[serde(default)]
-    filled: u64,
+    filled_quantity: u64,
     status: OrderStatus,
+}
+
+impl Order {
+    #[inline]
+    fn id(&self) -> OrderId {
+        self.id
+    }
+
+    #[inline]
+    fn side(&self) -> OrderSide {
+        self.side
+    }
+
+    #[inline]
+    fn limit_price(&self) -> Option<u64> {
+        match self.type_ {
+            OrderType::Limit { limit_price, .. } => Some(limit_price),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    fn remaining(&self) -> u64 {
+        self.total_quantity - self.filled_quantity
+    }
+
+    #[inline]
+    fn status(&self) -> OrderStatus {
+        self.status
+    }
+
+    #[inline]
+    fn _is_all_or_none(&self) -> bool {
+        match self.type_ {
+            OrderType::Market { all_or_none }
+            | OrderType::Limit {
+                time_in_force: TimeInForce::ImmediateOrCancel { all_or_none },
+                ..
+            } => all_or_none,
+            _ => false,
+        }
+    }
+
+    #[inline]
+    fn is_closed(&self) -> bool {
+        matches!(
+            self.status(),
+            OrderStatus::Cancelled | OrderStatus::Closed | OrderStatus::Completed
+        )
+    }
+
+    #[inline]
+    fn _is_immediate_or_cancel(&self) -> bool {
+        matches!(
+            self.type_,
+            OrderType::Limit {
+                time_in_force: TimeInForce::ImmediateOrCancel { .. },
+                ..
+            } | OrderType::Market { .. }
+        )
+    }
+
+    #[inline]
+    fn _is_post_only(&self) -> bool {
+        matches!(self.type_, OrderType::Limit { time_in_force: TimeInForce::GoodTilCancel { post_only }, .. } if post_only)
+    }
+
+    #[inline]
+    fn _trade(&mut self, other: &mut Self) -> Option<Trade> {
+        let (taker, maker) = (self, other);
+        Trade::new(taker, maker).ok()
+    }
+
+    #[inline]
+    fn matches(&self, order: &Self) -> bool {
+        let (taker, maker) = (self, order);
+
+        if taker.is_closed() || maker.is_closed() {
+            return false;
+        }
+
+        match (taker.side(), maker.side()) {
+            (OrderSide::Ask, OrderSide::Bid) => matches!(taker.type_, OrderType::Market { .. }) || taker <= maker,
+            (OrderSide::Bid, OrderSide::Ask) => matches!(taker.type_, OrderType::Market { .. }) || taker >= maker,
+            _ => false,
+        }
+    }
+
+    #[inline]
+    fn _cancel(&mut self) {
+        match self.status() {
+            OrderStatus::Open => self.status = OrderStatus::Cancelled,
+            OrderStatus::Partial => self.status = OrderStatus::Closed,
+            _ => (),
+        }
+    }
+
+    fn fill(&mut self, amount: u64) -> Result<(), OrderError> {
+        if amount > self.remaining() {
+            return Err(OrderError::Overfill {
+                fill: amount,
+                remaining: self.remaining(),
+            });
+        }
+
+        self.filled_quantity += amount;
+        self.status = if self.filled_quantity == self.total_quantity {
+            OrderStatus::Completed
+        } else {
+            OrderStatus::Partial
+        };
+
+        Ok(())
+    }
+}
+
+impl PartialEq for Order {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.id.eq(&other.id)
+    }
+}
+impl Eq for Order {}
+
+impl PartialOrd for Order {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        let ord = if self.id.eq(&other.id) {
+            Ordering::Equal
+        } else {
+            self.limit_price()?.cmp(&other.limit_price()?)
+        };
+
+        Some(ord)
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum OrderError {
+    #[error("fill exceeds remaning amount (fill={}, remaining={})", .fill, .remaining)]
+    Overfill { fill: u64, remaining: u64 },
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct Trade {
+    taker: OrderId,
+    maker: OrderId,
+    quantity: u64,
+    price: u64,
+}
+
+impl Trade {
+    #[inline]
+    pub fn new(taker: &mut Order, maker: &mut Order) -> Result<Trade, TradeError> {
+        if !taker.matches(maker) {
+            Err(TradeError::PriceError)?;
+        }
+
+        let traded = taker.remaining().min(maker.remaining());
+        let price = maker.limit_price().expect("maker must always have a price");
+
+        taker.fill(traded)?;
+        maker.fill(traded)?;
+
+        Ok(Trade {
+            taker: taker.id(),
+            maker: maker.id(),
+            quantity: traded,
+            price,
+        })
+    }
+
+    #[inline]
+    pub fn price(&self) -> u64 {
+        self.price
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum TradeError {
+    #[error("prices do not match each other")]
+    PriceError,
+    #[error("order error: {0}")]
+    OrderError(#[from] OrderError),
 }
 
 pub mod util {
