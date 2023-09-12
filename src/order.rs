@@ -138,6 +138,14 @@ impl Order {
     }
 
     #[inline]
+    fn is_closed(&self) -> bool {
+        matches!(
+            self.status(),
+            OrderStatus::Cancelled | OrderStatus::Closed | OrderStatus::Completed
+        )
+    }
+
+    #[inline]
     fn _is_all_or_none(&self) -> bool {
         match self.type_ {
             OrderType::Market { all_or_none }
@@ -147,14 +155,6 @@ impl Order {
             } => all_or_none,
             _ => false,
         }
-    }
-
-    #[inline]
-    fn is_closed(&self) -> bool {
-        matches!(
-            self.status(),
-            OrderStatus::Cancelled | OrderStatus::Closed | OrderStatus::Completed
-        )
     }
 
     #[inline]
@@ -261,7 +261,7 @@ impl Trade {
     #[inline]
     pub fn new(taker: &mut Order, maker: &mut Order) -> Result<Trade, TradeError> {
         if !taker.matches(maker) {
-            Err(TradeError::PriceError)?;
+            Err(TradeError::PriceNotMatching)?;
         }
 
         let traded = taker.remaining().min(maker.remaining());
@@ -287,7 +287,7 @@ impl Trade {
 #[derive(Debug, Error)]
 pub enum TradeError {
     #[error("prices do not match each other")]
-    PriceError,
+    PriceNotMatching,
     #[error("order error: {0}")]
     OrderError(#[from] OrderError),
 }

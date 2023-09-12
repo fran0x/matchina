@@ -9,7 +9,10 @@ use anyhow::Result;
 use clap::Parser;
 use compact_str::CompactString;
 use crossbeam_channel::unbounded;
-use exchange::{engine::Engine, order::util::DEFAULT_PAIR};
+use exchange::{
+    engine::Engine,
+    order::{util::DEFAULT_PAIR, OrderRequest},
+};
 use tracing::{error, info};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_log::LogTracer;
@@ -56,25 +59,55 @@ impl FromStr for Output {
     }
 }
 
-// TODO: use eyre instead of anyhow
 fn main() -> Result<()> {
-    // TODO: configure panic
-
-    // configure logging
+    // Initialize logging
     let _guard = init_logs();
 
-    info!("matching engine started!");
+    info!("Matching engine started!");
 
-    // parse command line arguments
+    // Parse command line arguments
     let args = Args::parse();
 
     let (tx, rx) = unbounded();
 
-    // read orders
+    // Start reading orders in a separate thread
+    let reader = read(args.input.unwrap_or_default(), tx);
+    reader.join().expect("order reader thread panicked")?;
+
+    // Create the matching engine
+    let mut engine = Engine::new(&args.pair);
+
+    // Process all the order requests
+    process(&mut engine, rx)?;
+
+    // Report results
+    info!("Matching engine finished!");
+    report(args.output.unwrap_or_default())?;
+
+    Ok(())
+}
+
+fn init_logs() -> WorkerGuard {
+    LogTracer::init().expect("Unable to set up log tracer");
+
+    let (non_blocking_writer, guard) = tracing_appender::non_blocking(std::io::stdout());
+    let stdout_layer = fmt::layer()
+        .json()
+        .with_thread_names(true)
+        .with_writer(non_blocking_writer)
+        .with_filter(EnvFilter::from_default_env());
+
+    let subscriber = Registry::default().with(stdout_layer);
+    tracing::subscriber::set_global_default(subscriber).expect("Failed to set global subscriber");
+
+    guard
+}
+
+fn read(input_source: Input, tx: crossbeam_channel::Sender<OrderRequest>) -> std::thread::JoinHandle<Result<()>> {
     std::thread::spawn(move || -> Result<()> {
-        let mut buf_read: Box<dyn BufRead> = match &args.input.unwrap_or_default() {
+        let mut buf_read: Box<dyn BufRead> = match &input_source {
             Input::File(path) => {
-                let file = std::fs::File::open(path).expect("invalid file: {path}");
+                let file = std::fs::File::open(path)?;
                 Box::new(BufReader::new(file))
             }
             Input::Stdin => {
@@ -92,53 +125,45 @@ fn main() -> Result<()> {
                     if error.is_eof() {
                         break;
                     }
-
-                    error!("error processing source of orders: {error}");
+                    error!("Error processing source of orders: {}", error);
                 }
                 Ok(order) => tx.send(order)?,
             }
         }
 
         Ok(())
-    });
+    })
+}
 
-    // create the matching engine
-    let mut engine = Engine::new(&args.pair);
-
-    // process all the order requests
-    let mut i = 0.0f64;
+fn process(engine: &mut Engine, rx: crossbeam_channel::Receiver<OrderRequest>) -> Result<()> {
+    let mut i = 0.0;
     let start = Instant::now();
+
     while let Ok(order_request) = rx.recv() {
         if let Err(error) = engine.process(order_request) {
-            error!("error processing order request: {error}");
-        };
+            error!("Error processing order request: {}", error);
+        }
         i += 1.0;
     }
+
     let end = Instant::now();
     let elapsed = end - start;
 
-    // report results
-    info!("matching engine finished!");
-    match &args.output.unwrap_or_default() {
-        Output::Stdout => info!("{i} order requests processed in {} milliseconds", elapsed.as_millis()),
-        Output::File(..) => unimplemented!(),
-    };
+    info!("Matching engine finished!");
+    info!(
+        "{:.0} order requests processed in {} milliseconds",
+        i,
+        elapsed.as_millis()
+    );
 
     Ok(())
 }
 
-fn init_logs() -> WorkerGuard {
-    LogTracer::init().expect("unable to setup log tracer!");
+fn report(output_destination: Output) -> Result<()> {
+    match output_destination {
+        Output::Stdout => (),
+        Output::File(..) => unimplemented!(),
+    }
 
-    let (non_blocking_writer, guard) = tracing_appender::non_blocking(std::io::stdout());
-    let stdout_layer = fmt::layer()
-        .json()
-        .with_thread_names(true)
-        .with_writer(non_blocking_writer)
-        .with_filter(EnvFilter::from_default_env());
-
-    let subscriber = Registry::default().with(stdout_layer);
-    tracing::subscriber::set_global_default(subscriber).expect("failed to set global subscriber");
-
-    guard
+    Ok(())
 }
