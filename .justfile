@@ -19,7 +19,7 @@ build:
 
 # execute tests
 test:
-    cargo test run --all-targets
+    cargo test
 
 # execute benchmarks
 bench:

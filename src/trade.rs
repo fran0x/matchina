@@ -54,15 +54,15 @@ mod test {
     };
 
     #[test]
-    fn test_trade_new() {
+    fn match_limit_orders() {
         // create two mock limit orders with matching prices
         let taker_id = 1;
         let maker_id = 2;
-        let taker = Order::limit_order(taker_id, OrderSide::Bid, 100, 15);
-        let maker = Order::limit_order(maker_id, OrderSide::Ask, 100, 10);
+        let mut taker = Order::limit_order(taker_id, OrderSide::Bid, 100, 15);
+        let mut maker = Order::limit_order(maker_id, OrderSide::Ask, 100, 10);
 
         // call Trade::new and expect it to succeed
-        let result = Trade::new(&mut taker.clone(), &mut maker.clone());
+        let result = Trade::new(&mut taker, &mut maker);
         assert!(result.is_ok());
 
         // check that the orders have been filled correctly
