@@ -7,8 +7,8 @@ use crate::order::{Order, OrderError, OrderId, OrderPrice, OrderQuantity};
 pub struct Trade {
     taker: OrderId,
     maker: OrderId,
-    quantity: OrderQuantity,
     price: OrderPrice,
+    quantity: OrderQuantity,
 }
 
 impl Trade {
@@ -27,8 +27,8 @@ impl Trade {
         Ok(Trade {
             taker: taker.id(),
             maker: maker.id(),
-            quantity: traded,
             price,
+            quantity: traded,
         })
     }
 
@@ -49,31 +49,31 @@ pub enum TradeError {
 #[cfg(test)]
 mod test {
     use crate::{
-        order::{Order, OrderSide},
+        order::{Order, OrderId, OrderSide},
         trade::Trade,
     };
 
     #[test]
     fn match_limit_orders() {
         // create two mock limit orders with matching prices
-        let taker_id = 1;
-        let maker_id = 2;
-        let mut taker = Order::limit_order(taker_id, OrderSide::Bid, 100, 15);
-        let mut maker = Order::limit_order(maker_id, OrderSide::Ask, 100, 10);
+        let taker_id: OrderId = 1.into();
+        let maker_id: OrderId = 2.into();
+        let mut taker = Order::limit_order(taker_id, OrderSide::Bid, 100.into(), 15.into());
+        let mut maker = Order::limit_order(maker_id, OrderSide::Ask, 100.into(), 10.into());
 
         // call Trade::new and expect it to succeed
         let result = Trade::new(&mut taker, &mut maker);
         assert!(result.is_ok());
 
         // check that the orders have been filled correctly
-        assert_eq!(taker.remaining(), 5);
-        assert_eq!(maker.remaining(), 0);
+        assert_eq!(taker.remaining(), 5.into());
+        assert_eq!(maker.remaining(), 0.into());
 
         // check the details of the trade
         let trade = result.unwrap();
         assert_eq!(trade.taker, taker_id);
         assert_eq!(trade.maker, maker_id);
-        assert_eq!(trade.quantity, 10);
-        assert_eq!(trade.price, 100);
+        assert_eq!(trade.quantity, 10.into());
+        assert_eq!(trade.price, 100.into());
     }
 }

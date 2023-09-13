@@ -7,19 +7,39 @@ use thiserror::Error;
 
 use crate::trade::Trade;
 
+#[derive(Clone, Copy, Debug, Hash, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OrderId(u64);
+
+impl OrderId {
+    #[inline]
+    pub fn new(order_id: u64) -> Self {
+        Self(order_id)
+    }
+}
+
+impl From<u64> for OrderId {
+    fn from(value: u64) -> OrderId {
+        OrderId::new(value)
+    }
+}
+
+// TODO use struct to give behavior (see OrderId)
+pub type OrderPrice = Decimal;
+pub type OrderQuantity = Decimal;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "UPPERCASE", tag = "order_request")]
 pub enum OrderRequest {
     Create {
         account_id: CompactString,
-        order_id: CompactString,
+        order_id: u64,
         pair: CompactString,
-        quantity: Decimal,
-        price: Decimal,
         side: OrderSide,
+        limit_price: Decimal, // for market orders wrap in Option
+        quantity: Decimal,
     },
     Cancel {
-        order_id: CompactString,
+        order_id: u64,
     },
 }
 
@@ -41,10 +61,6 @@ impl std::ops::Not for OrderSide {
         }
     }
 }
-
-pub type OrderId = u64;
-pub type OrderPrice = u64;
-pub type OrderQuantity = u64;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "UPPERCASE", tag = "order_type")]
@@ -97,10 +113,10 @@ pub enum OrderStatus {
 pub struct Order {
     id: OrderId,
     side: OrderSide,
-    #[serde(flatten)]
+    //#[serde(flatten)]
     type_: OrderType,
     order_quantity: OrderQuantity,
-    #[serde(default)]
+    //#[serde(default)]
     filled_quantity: OrderQuantity,
     status: OrderStatus,
 }
@@ -116,7 +132,7 @@ impl Order {
                 time_in_force: Default::default(),
             },
             order_quantity: quantity,
-            filled_quantity: 0,
+            filled_quantity: 0.into(),
             status: OrderStatus::Open,
         }
     }
@@ -278,20 +294,20 @@ pub mod util {
         range.map(move |i| {
             if rng.gen_bool(1.0 / 1000.0) {
                 OrderRequest::Cancel {
-                    order_id: format_compact!("{}", rng.gen_range(1..=i as u64)),
+                    order_id: rng.gen_range(1..=i as u64),
                 }
             } else {
                 OrderRequest::Create {
                     account_id: format_compact!("{}", rng.gen_range(1..100)),
-                    order_id: format_compact!("{}", i as u64),
+                    order_id: i as u64,
                     pair: CompactString::new_inline(DEFAULT_PAIR),
-                    quantity: rng.gen_range(100..10_000).into(),
-                    price: rng.gen_range(100..10_000).into(),
                     side: if rng.gen_bool(0.5) {
                         OrderSide::Ask
                     } else {
                         OrderSide::Bid
                     },
+                    limit_price: rng.gen_range(100..10_000).into(),
+                    quantity: rng.gen_range(100..10_000).into(),
                 }
             }
         })
