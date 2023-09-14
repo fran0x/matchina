@@ -1,6 +1,6 @@
 use std::{
     cmp::Reverse,
-    collections::{BTreeMap, VecDeque},
+    collections::{btree_map::Entry, BTreeMap, VecDeque},
 };
 
 use indexmap::IndexMap;
@@ -18,7 +18,7 @@ const _DEFAULT_LEVEL_SIZE: usize = 8;
 
 #[derive(Default)]
 pub struct Orderbook {
-    _orders: IndexMap<OrderId, Order>,
+    _orders: IndexMap<OrderId, LimitOrder>,
     _asks: BTreeMap<OrderPrice, VecDeque<OrderId>>,
     _bids: BTreeMap<Reverse<OrderPrice>, VecDeque<OrderId>>,
 }
@@ -49,7 +49,55 @@ impl Orderbook {
         }
         .push_back(order.id());
 
-        self._orders.insert(order.id(), *order);
+        self._orders.insert(order.id(), order);
+    }
+
+    #[inline]
+    fn _remove(&mut self, order_id: &OrderId) -> Option<LimitOrder> {
+        let order = self._orders.remove(order_id)?;
+
+        let limit_price = order.limit_price();
+
+        match order.side() {
+            OrderSide::Ask => {
+                let Entry::Occupied(mut level) = self._asks.entry(limit_price)
+                else {
+                    unreachable!();
+                };
+
+                // prevent dangling levels
+                if level.get().len() == 1 {
+                    level.remove().pop_front()
+                } else {
+                    level
+                        .get()
+                        .iter()
+                        .position(|&order_id| order.id() == order_id)
+                        .and_then(|index| level.get_mut().remove(index))
+                }
+            }
+            OrderSide::Bid => {
+                let Entry::Occupied(mut level) =
+                    self._bids.entry(Reverse(limit_price))
+                else {
+                    unreachable!();
+                };
+
+                // prevent dangling levels
+                if level.get().len() == 1 {
+                    level.remove().pop_front()
+                } else {
+                    level
+                        .get()
+                        .iter()
+                        .position(|&order_id| order.id() == order_id)
+                        .and_then(|index| level.get_mut().remove(index))
+                }
+            }
+        }
+        .expect("indexed orders must be in the book tree");
+
+        Some(order)
     }
 }
 
