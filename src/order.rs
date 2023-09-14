@@ -1,4 +1,7 @@
-use std::cmp::Ordering;
+use std::{
+    cmp::Ordering,
+    ops::{Deref, DerefMut},
+};
 
 use compact_str::CompactString;
 use rust_decimal::Decimal;
@@ -123,27 +126,12 @@ pub struct Order {
 
 impl Order {
     #[inline]
-    pub fn limit_order(id: OrderId, side: OrderSide, limit_price: OrderPrice, quantity: OrderQuantity) -> Self {
-        Self {
-            id,
-            side,
-            type_: OrderType::Limit {
-                limit_price,
-                time_in_force: Default::default(),
-            },
-            order_quantity: quantity,
-            filled_quantity: 0.into(),
-            status: OrderStatus::Open,
-        }
-    }
-
-    #[inline]
     pub fn id(&self) -> OrderId {
         self.id
     }
 
     #[inline]
-    fn side(&self) -> OrderSide {
+    pub fn side(&self) -> OrderSide {
         self.side
     }
 
@@ -268,6 +256,50 @@ impl PartialOrd for Order {
         };
 
         Some(ord)
+    }
+}
+
+pub struct LimitOrder {
+    order: Order,
+    limit_price: Decimal,
+}
+
+impl LimitOrder {
+    #[inline]
+    pub fn new(id: OrderId, side: OrderSide, limit_price: OrderPrice, quantity: OrderQuantity) -> Self {
+        let order = Order {
+            id,
+            side,
+            type_: OrderType::Limit {
+                limit_price,
+                time_in_force: Default::default(),
+            },
+            order_quantity: quantity,
+            filled_quantity: 0.into(),
+            status: OrderStatus::Open,
+        };
+        Self { order, limit_price }
+    }
+
+    #[inline]
+    pub fn limit_price(&self) -> OrderPrice {
+        self.limit_price
+    }
+}
+
+impl Deref for LimitOrder {
+    type Target = Order;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.order
+    }
+}
+
+impl DerefMut for LimitOrder {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.order
     }
 }
 

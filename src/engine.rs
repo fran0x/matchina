@@ -3,8 +3,8 @@ use compact_str::CompactString;
 use thiserror::Error;
 
 use crate::{
-    order::{Order, OrderRequest},
-    orderbook::Orderbook,
+    order::{LimitOrder, OrderRequest},
+    orderbook::{Handler, Orderbook},
 };
 
 pub struct Engine {
@@ -32,11 +32,11 @@ impl Engine {
                 limit_price,
                 quantity,
             } => {
-                let order = Order::limit_order(order_id.into(), side, limit_price, quantity);
-                let _ = self.orderbook.r#match(order);
+                let order = LimitOrder::new(order_id.into(), side, limit_price, quantity);
+                let _ = self.orderbook.handle_create(order);
             }
             OrderRequest::Cancel { order_id } => {
-                let _ = self.orderbook.remove(order_id.into());
+                let _ = self.orderbook.handle_cancel(order_id.into());
             }
         };
 
