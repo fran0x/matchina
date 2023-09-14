@@ -6,12 +6,12 @@ use std::{
 use indexmap::IndexMap;
 use thiserror::Error;
 
-use crate::order::{LimitOrder, Order, OrderId, OrderPrice, OrderSide};
+use crate::order::{LimitOrder, OrderId, OrderPrice, OrderSide};
 
 pub trait Handler {
     fn handle_create(&mut self, _order: LimitOrder) -> Result<(), OrderbookError>;
 
-    fn handle_cancel(&mut self, _order_id: OrderId) -> Option<Order>;
+    fn handle_cancel(&mut self, _order_id: OrderId) -> Option<LimitOrder>;
 }
 
 const _DEFAULT_LEVEL_SIZE: usize = 8;
@@ -19,8 +19,8 @@ const _DEFAULT_LEVEL_SIZE: usize = 8;
 #[derive(Default)]
 pub struct Orderbook {
     _orders: IndexMap<OrderId, LimitOrder>,
-    _asks: BTreeMap<OrderPrice, VecDeque<OrderId>>,
-    _bids: BTreeMap<Reverse<OrderPrice>, VecDeque<OrderId>>,
+    asks: BTreeMap<OrderPrice, VecDeque<OrderId>>,
+    bids: BTreeMap<Reverse<OrderPrice>, VecDeque<OrderId>>,
 }
 
 impl Handler for Orderbook {
@@ -29,8 +29,8 @@ impl Handler for Orderbook {
     }
 
     #[inline]
-    fn handle_cancel(&mut self, _order_id: OrderId) -> Option<Order> {
-        todo!()
+    fn handle_cancel(&mut self, order_id: OrderId) -> Option<LimitOrder> {
+        self.remove(&order_id)
     }
 }
 
@@ -39,11 +39,11 @@ impl Orderbook {
     fn _insert(&mut self, order: LimitOrder) {
         match order.side() {
             OrderSide::Ask => self
-                ._asks
+                .asks
                 .entry(order.limit_price())
                 .or_insert_with(|| VecDeque::with_capacity(_DEFAULT_LEVEL_SIZE)),
             OrderSide::Bid => self
-                ._bids
+                .bids
                 .entry(Reverse(order.limit_price()))
                 .or_insert_with(|| VecDeque::with_capacity(_DEFAULT_LEVEL_SIZE)),
         }
@@ -53,14 +53,13 @@ impl Orderbook {
     }
 
     #[inline]
-    fn _remove(&mut self, order_id: &OrderId) -> Option<LimitOrder> {
+    fn remove(&mut self, order_id: &OrderId) -> Option<LimitOrder> {
         let order = self._orders.remove(order_id)?;
-
         let limit_price = order.limit_price();
 
         match order.side() {
             OrderSide::Ask => {
-                let Entry::Occupied(mut level) = self._asks.entry(limit_price)
+                let Entry::Occupied(mut level) = self.asks.entry(limit_price)
                 else {
                     unreachable!();
                 };
@@ -78,7 +77,7 @@ impl Orderbook {
             }
             OrderSide::Bid => {
                 let Entry::Occupied(mut level) =
-                    self._bids.entry(Reverse(limit_price))
+                    self.bids.entry(Reverse(limit_price))
                 else {
                     unreachable!();
                 };
@@ -94,8 +93,7 @@ impl Orderbook {
                         .and_then(|index| level.get_mut().remove(index))
                 }
             }
-        }
-        .expect("indexed orders must be in the book tree");
+        };
 
         Some(order)
     }
