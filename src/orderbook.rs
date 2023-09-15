@@ -18,7 +18,7 @@ const DEFAULT_LEVEL_SIZE: usize = 8;
 
 #[derive(Default)]
 pub struct Orderbook {
-    _orders: IndexMap<OrderId, LimitOrder>,
+    orders: IndexMap<OrderId, LimitOrder>,
     asks: BTreeMap<OrderPrice, VecDeque<OrderId>>,
     bids: BTreeMap<Reverse<OrderPrice>, VecDeque<OrderId>>,
 }
@@ -66,7 +66,7 @@ impl Orderbook {
         }
         .push_back(order.id());
 
-        self._orders.insert(order.id(), order);
+        self.orders.insert(order.id(), order);
     }
 
     #[inline]
@@ -76,7 +76,7 @@ impl Orderbook {
             OrderSide::Bid => self.bids.first_key_value().map(|(_, level)| level)?,
         }
         .front()
-        .and_then(|order_id| self._orders.get_mut(order_id))
+        .and_then(|order_id| self.orders.get_mut(order_id))
     }
 
     #[inline]
@@ -101,12 +101,12 @@ impl Orderbook {
                 }
             }
         }
-        .and_then(|order_id| self._orders.remove(&order_id))
+        .and_then(|order_id| self.orders.remove(&order_id))
     }
 
     #[inline]
     fn remove(&mut self, order_id: &OrderId) -> Option<LimitOrder> {
-        let order = self._orders.remove(order_id)?;
+        let order = self.orders.remove(order_id)?;
         let limit_price = order.limit_price();
 
         match order.side() {

@@ -136,14 +136,6 @@ impl Order {
     }
 
     #[inline]
-    pub fn limit_price(&self) -> Option<OrderPrice> {
-        match self.type_ {
-            OrderType::Limit { limit_price, .. } => Some(limit_price),
-            _ => None,
-        }
-    }
-
-    #[inline]
     pub fn remaining(&self) -> OrderQuantity {
         self.order_quantity - self.filled_quantity
     }
@@ -162,35 +154,7 @@ impl Order {
     }
 
     #[inline]
-    fn _is_all_or_none(&self) -> bool {
-        match self.type_ {
-            OrderType::Market { all_or_none }
-            | OrderType::Limit {
-                time_in_force: TimeInForce::ImmediateOrCancel { all_or_none },
-                ..
-            } => all_or_none,
-            _ => false,
-        }
-    }
-
-    #[inline]
-    fn _is_immediate_or_cancel(&self) -> bool {
-        matches!(
-            self.type_,
-            OrderType::Limit {
-                time_in_force: TimeInForce::ImmediateOrCancel { .. },
-                ..
-            } | OrderType::Market { .. }
-        )
-    }
-
-    #[inline]
-    fn _is_post_only(&self) -> bool {
-        matches!(self.type_, OrderType::Limit { time_in_force: TimeInForce::GoodTilCancel { post_only }, .. } if post_only)
-    }
-
-    #[inline]
-    pub fn trade(&mut self, other: &mut Self) -> Option<Trade> {
+    pub fn trade(&mut self, other: &mut LimitOrder) -> Option<Trade> {
         let (taker, maker) = (self, other);
         Trade::new(taker, maker).ok()
     }
@@ -207,15 +171,6 @@ impl Order {
             (OrderSide::Ask, OrderSide::Bid) => matches!(taker.type_, OrderType::Market { .. }) || taker <= maker,
             (OrderSide::Bid, OrderSide::Ask) => matches!(taker.type_, OrderType::Market { .. }) || taker >= maker,
             _ => false,
-        }
-    }
-
-    #[inline]
-    fn _cancel(&mut self) {
-        match self.status() {
-            OrderStatus::Open => self.status = OrderStatus::Cancelled,
-            OrderStatus::Partial => self.status = OrderStatus::Closed,
-            _ => (),
         }
     }
 
@@ -238,21 +193,21 @@ impl Order {
     }
 }
 
-impl PartialEq for Order {
+impl PartialEq for LimitOrder {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.id.eq(&other.id)
     }
 }
-impl Eq for Order {}
+impl Eq for LimitOrder {}
 
-impl PartialOrd for Order {
+impl PartialOrd for LimitOrder {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         let ord = if self.id.eq(&other.id) {
             Ordering::Equal
         } else {
-            self.limit_price()?.cmp(&other.limit_price()?)
+            self.limit_price().cmp(&other.limit_price())
         };
 
         Some(ord)

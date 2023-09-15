@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::order::{Order, OrderError, OrderId, OrderPrice, OrderQuantity};
+use crate::order::{LimitOrder, OrderError, OrderId, OrderPrice, OrderQuantity, Order};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Trade {
@@ -13,13 +13,13 @@ pub struct Trade {
 
 impl Trade {
     #[inline]
-    pub fn new(taker: &mut Order, maker: &mut Order) -> Result<Trade, TradeError> {
+    pub fn new(taker: &mut Order, maker: &mut LimitOrder) -> Result<Trade, TradeError> {
         if !taker.matches(maker) {
             Err(TradeError::PriceNotMatching)?;
         }
 
         let traded = taker.remaining().min(maker.remaining());
-        let price = maker.limit_price().expect("maker must always have a price");
+        let price = maker.limit_price();
 
         taker.fill(traded)?;
         maker.fill(traded)?;
