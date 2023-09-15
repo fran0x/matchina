@@ -9,12 +9,12 @@ use thiserror::Error;
 use crate::order::{LimitOrder, OrderId, OrderPrice, OrderSide};
 
 pub trait Handler {
-    fn handle_create(&mut self, _order: LimitOrder) -> Result<(), OrderbookError>;
+    fn handle_create(&mut self, order: LimitOrder) -> Result<(), OrderbookError>;
 
-    fn handle_cancel(&mut self, _order_id: OrderId) -> Option<LimitOrder>;
+    fn handle_cancel(&mut self, order_id: OrderId) -> Option<LimitOrder>;
 }
 
-const _DEFAULT_LEVEL_SIZE: usize = 8;
+const DEFAULT_LEVEL_SIZE: usize = 8;
 
 #[derive(Default)]
 pub struct Orderbook {
@@ -24,8 +24,25 @@ pub struct Orderbook {
 }
 
 impl Handler for Orderbook {
-    fn handle_create(&mut self, _order: LimitOrder) -> Result<(), OrderbookError> {
-        todo!()
+    fn handle_create(&mut self, mut incoming_order: LimitOrder) -> Result<(), OrderbookError> {
+        let opposite = !incoming_order.side();
+        while let (false, Some(top_order)) = (incoming_order.is_closed(), self.peek_mut(&opposite)) {
+            let Some(_trade) = incoming_order.trade(top_order) else {
+                break; // no match with top order, move on
+            };
+
+            if top_order.is_closed() {
+                // if top order is completed remove from the book
+                self.pop(&opposite).expect("no top order found");
+            }
+        }
+
+        // insert incoming order in book if not completed
+        if !incoming_order.is_closed() {
+            self.insert(incoming_order);
+        }
+
+        Ok(())
     }
 
     #[inline]
@@ -36,20 +53,55 @@ impl Handler for Orderbook {
 
 impl Orderbook {
     #[inline]
-    fn _insert(&mut self, order: LimitOrder) {
+    fn insert(&mut self, order: LimitOrder) {
         match order.side() {
             OrderSide::Ask => self
                 .asks
                 .entry(order.limit_price())
-                .or_insert_with(|| VecDeque::with_capacity(_DEFAULT_LEVEL_SIZE)),
+                .or_insert_with(|| VecDeque::with_capacity(DEFAULT_LEVEL_SIZE)),
             OrderSide::Bid => self
                 .bids
                 .entry(Reverse(order.limit_price()))
-                .or_insert_with(|| VecDeque::with_capacity(_DEFAULT_LEVEL_SIZE)),
+                .or_insert_with(|| VecDeque::with_capacity(DEFAULT_LEVEL_SIZE)),
         }
         .push_back(order.id());
 
         self._orders.insert(order.id(), order);
+    }
+
+    #[inline]
+    fn peek_mut(&mut self, side: &OrderSide) -> Option<&mut LimitOrder> {
+        match side {
+            OrderSide::Ask => self.asks.first_key_value().map(|(_, level)| level)?,
+            OrderSide::Bid => self.bids.first_key_value().map(|(_, level)| level)?,
+        }
+        .front()
+        .and_then(|order_id| self._orders.get_mut(order_id))
+    }
+
+    #[inline]
+    fn pop(&mut self, side: &OrderSide) -> Option<LimitOrder> {
+        match side {
+            OrderSide::Ask => {
+                let mut level = self.asks.first_entry()?;
+                // prevents dangling levels
+                if level.get().len() == 1 {
+                    level.remove().pop_front()
+                } else {
+                    level.get_mut().pop_front()
+                }
+            }
+            OrderSide::Bid => {
+                let mut level = self.bids.first_entry()?;
+                // prevents dangling levels
+                if level.get().len() == 1 {
+                    level.remove().pop_front()
+                } else {
+                    level.get_mut().pop_front()
+                }
+            }
+        }
+        .and_then(|order_id| self._orders.remove(&order_id))
     }
 
     #[inline]

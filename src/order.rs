@@ -154,7 +154,7 @@ impl Order {
     }
 
     #[inline]
-    fn is_closed(&self) -> bool {
+    pub fn is_closed(&self) -> bool {
         matches!(
             self.status(),
             OrderStatus::Cancelled | OrderStatus::Closed | OrderStatus::Completed
@@ -190,7 +190,7 @@ impl Order {
     }
 
     #[inline]
-    fn _trade(&mut self, other: &mut Self) -> Option<Trade> {
+    pub fn trade(&mut self, other: &mut Self) -> Option<Trade> {
         let (taker, maker) = (self, other);
         Trade::new(taker, maker).ok()
     }
