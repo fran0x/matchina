@@ -15,7 +15,7 @@ A simple matching engine for a crypto exchange.
 - [ ] REST gateway to place and cancel orders, communicating with matching engine via SHM
 - [ ] Watcher sidecar to compute metrics on the fly (spread, depth, ...), communicating with matching engine via SHM
 - [ ] Persister sidecar to record order flow and trades, communicating with matching engine via SH
-- [ ] support multiple accounts (with asset balance, self matching prevention...)
+- [ ] support multiple accounts (with asset balance, self matching prevention...) - internal order ID vs external order ID (current)
 - [ ] support multiple pairs (with load balancer...)
 
 ...and more.
