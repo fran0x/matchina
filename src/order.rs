@@ -174,11 +174,16 @@ impl Order {
     #[inline]
     pub fn limit_price(&self) -> Option<OrderPrice> {
         match self.type_ {
-            OrderType::Limit {
-                limit_price,
-                time_in_force: _,
-            } => Some(limit_price),
-            OrderType::Market { all_or_none: _ } => None,
+            OrderType::Limit { limit_price, .. } => Some(limit_price),
+            OrderType::Market { .. } => None,
+        }
+    }
+
+    #[inline]
+    pub fn is_bookable(&self) -> bool {
+        match self.type_ {
+            OrderType::Limit { .. } => true,
+            OrderType::Market { .. } => false,
         }
     }
 
@@ -204,10 +209,13 @@ impl Order {
             return false;
         }
 
-        match (taker.side(), maker.side()) {
-            (OrderSide::Ask, OrderSide::Bid) => matches!(taker.type_, OrderType::Market { .. }) || taker <= maker,
-            (OrderSide::Bid, OrderSide::Ask) => matches!(taker.type_, OrderType::Market { .. }) || taker >= maker,
-            _ => false,
+        match taker.type_ {
+            OrderType::Limit { .. } => match (taker.side(), maker.side()) {
+                (OrderSide::Ask, OrderSide::Bid) => taker <= maker,
+                (OrderSide::Bid, OrderSide::Ask) => taker >= maker,
+                _ => false,
+            },
+            OrderType::Market { .. } => true,
         }
     }
 

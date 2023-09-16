@@ -37,8 +37,8 @@ impl Handler for Orderbook {
             }
         }
 
-        // insert incoming order in book if not completed
-        if !order.is_closed() {
+        // insert incoming order if is bookable and is not completed
+        if order.is_bookable() && !order.is_closed() {
             self.insert(order);
         }
 
