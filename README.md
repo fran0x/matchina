@@ -11,11 +11,11 @@ A simple matching engine for a crypto exchange.
 
 - [ ] enforce IOC, FOK, PostOnly policies
 - [ ] generate unique trade IDs
-- [ ] WS gateway to broadcast order flow and trades, communicating with matching engine via SHM
-- [ ] REST gateway to place and cancel orders, communicating with matching engine via SHM
-- [ ] Watcher sidecar to compute metrics on the fly (spread, depth, ...), communicating with matching engine via SHM
-- [ ] Persister sidecar to record order flow and trades, communicating with matching engine via SH
-- [ ] support multiple accounts (with asset balance, self matching prevention...) - internal order ID vs external order ID (current)
+- [ ] WS gateway to broadcast order flow and trades (using SHM for comms with matching engine)
+- [ ] REST gateway to place and cancel orders (using SHM for comms with matching engine)
+- [ ] Watcher sidecar to compute metrics (spread, depth, ...) on the fly (using SHM for comms with matching engine)
+- [ ] Persister sidecar to record order flow and trades (using SHM for comms with matching engine)
+- [ ] support multiple accounts (with asset balance, self matching prevention...) - internal vs external (current) order ID
 - [ ] support multiple pairs (with load balancer...)
 
 ...and more.
