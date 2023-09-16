@@ -81,8 +81,7 @@ impl Orderbook {
 
         match order.side() {
             OrderSide::Ask => {
-                let Entry::Occupied(mut level) = self.asks.entry(limit_price)
-                else {
+                let Entry::Occupied(mut level) = self.asks.entry(limit_price) else {
                     unreachable!();
                 };
 
@@ -98,9 +97,7 @@ impl Orderbook {
                 }
             }
             OrderSide::Bid => {
-                let Entry::Occupied(mut level) =
-                    self.bids.entry(Reverse(limit_price))
-                else {
+                let Entry::Occupied(mut level) = self.bids.entry(Reverse(limit_price)) else {
                     unreachable!();
                 };
 
