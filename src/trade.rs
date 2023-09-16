@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::order::{LimitOrder, OrderError, OrderId, OrderPrice, OrderQuantity, Order};
+use crate::order::{Order, OrderError, OrderId, OrderPrice, OrderQuantity};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Trade {
@@ -13,13 +13,15 @@ pub struct Trade {
 
 impl Trade {
     #[inline]
-    pub fn new(taker: &mut Order, maker: &mut LimitOrder) -> Result<Trade, TradeError> {
+    pub fn new(taker: &mut Order, maker: &mut Order) -> Result<Trade, TradeError> {
         if !taker.matches(maker) {
             Err(TradeError::PriceNotMatching)?;
         }
 
         let traded = taker.remaining().min(maker.remaining());
-        let price = maker.limit_price();
+        let price = maker
+            .limit_price()
+            .expect("maker should be a limit order, always with a limit price");
 
         taker.fill(traded)?;
         maker.fill(traded)?;
@@ -49,7 +51,7 @@ pub enum TradeError {
 #[cfg(test)]
 mod test {
     use crate::{
-        order::{LimitOrder, OrderId, OrderSide},
+        order::{Order, OrderId, OrderSide},
         trade::Trade,
     };
 
@@ -58,8 +60,8 @@ mod test {
         // create two mock limit orders with matching prices
         let taker_id: OrderId = 1.into();
         let maker_id: OrderId = 2.into();
-        let mut taker = LimitOrder::new(taker_id, OrderSide::Bid, 100.into(), 15.into());
-        let mut maker = LimitOrder::new(maker_id, OrderSide::Ask, 100.into(), 10.into());
+        let mut taker = Order::limit_order(taker_id, OrderSide::Bid, 100.into(), 15.into());
+        let mut maker = Order::limit_order(maker_id, OrderSide::Ask, 100.into(), 10.into());
 
         // call Trade::new and expect it to succeed
         let result = Trade::new(&mut taker, &mut maker);

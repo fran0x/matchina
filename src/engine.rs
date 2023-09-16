@@ -3,7 +3,7 @@ use compact_str::CompactString;
 use thiserror::Error;
 
 use crate::{
-    order::{LimitOrder, OrderRequest},
+    order::{Order, OrderRequest},
     orderbook::{Handler, Orderbook},
 };
 
@@ -32,7 +32,7 @@ impl Engine {
                 limit_price,
                 quantity,
             } => {
-                let order = LimitOrder::new(order_id.into(), side, limit_price, quantity);
+                let order = Order::limit_order(order_id.into(), side, limit_price, quantity);
                 let _ = self.orderbook.handle_create(order);
             }
             OrderRequest::Cancel { order_id } => {

@@ -1,7 +1,4 @@
-use std::{
-    cmp::Ordering,
-    ops::{Deref, DerefMut},
-};
+use std::cmp::Ordering;
 
 use compact_str::CompactString;
 use rust_decimal::Decimal;
@@ -126,6 +123,21 @@ pub struct Order {
 
 impl Order {
     #[inline]
+    pub fn limit_order(id: OrderId, side: OrderSide, limit_price: OrderPrice, quantity: OrderQuantity) -> Self {
+        Self {
+            id,
+            side,
+            type_: OrderType::Limit {
+                limit_price,
+                time_in_force: Default::default(),
+            },
+            order_quantity: quantity,
+            filled_quantity: 0.into(),
+            status: OrderStatus::Open,
+        }
+    }
+
+    #[inline]
     pub fn id(&self) -> OrderId {
         self.id
     }
@@ -146,6 +158,17 @@ impl Order {
     }
 
     #[inline]
+    pub fn limit_price(&self) -> Option<OrderPrice> {
+        match self.type_ {
+            OrderType::Limit {
+                limit_price,
+                time_in_force: _,
+            } => Some(limit_price),
+            OrderType::Market { all_or_none: _ } => None,
+        }
+    }
+
+    #[inline]
     pub fn is_closed(&self) -> bool {
         matches!(
             self.status(),
@@ -154,14 +177,14 @@ impl Order {
     }
 
     #[inline]
-    pub fn trade(&mut self, other: &mut LimitOrder) -> Option<Trade> {
+    pub fn trade(&mut self, other: &mut Self) -> Option<Trade> {
         let (taker, maker) = (self, other);
         Trade::new(taker, maker).ok()
     }
 
     #[inline]
-    pub fn matches(&self, order: &Self) -> bool {
-        let (taker, maker) = (self, order);
+    pub fn matches(&self, maker: &Self) -> bool {
+        let taker = self;
 
         if taker.is_closed() || maker.is_closed() {
             return false;
@@ -193,15 +216,15 @@ impl Order {
     }
 }
 
-impl PartialEq for LimitOrder {
+impl PartialEq for Order {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.id.eq(&other.id)
     }
 }
-impl Eq for LimitOrder {}
+impl Eq for Order {}
 
-impl PartialOrd for LimitOrder {
+impl PartialOrd for Order {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         let ord = if self.id.eq(&other.id) {
@@ -211,50 +234,6 @@ impl PartialOrd for LimitOrder {
         };
 
         Some(ord)
-    }
-}
-
-pub struct LimitOrder {
-    order: Order,
-    limit_price: Decimal,
-}
-
-impl LimitOrder {
-    #[inline]
-    pub fn new(id: OrderId, side: OrderSide, limit_price: OrderPrice, quantity: OrderQuantity) -> Self {
-        let order = Order {
-            id,
-            side,
-            type_: OrderType::Limit {
-                limit_price,
-                time_in_force: Default::default(),
-            },
-            order_quantity: quantity,
-            filled_quantity: 0.into(),
-            status: OrderStatus::Open,
-        };
-        Self { order, limit_price }
-    }
-
-    #[inline]
-    pub fn limit_price(&self) -> OrderPrice {
-        self.limit_price
-    }
-}
-
-impl Deref for LimitOrder {
-    type Target = Order;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.order
-    }
-}
-
-impl DerefMut for LimitOrder {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.order
     }
 }
 
