@@ -14,6 +14,12 @@ pub trait Handler {
     fn handle_cancel(&mut self, order_id: OrderId) -> Option<Order>;
 }
 
+pub trait Watched {
+    fn peek(&self, side: &OrderSide) -> Option<&Order>;
+
+    fn peek_mut(&mut self, side: &OrderSide) -> Option<&mut Order>;
+}
+
 const DEFAULT_LEVEL_SIZE: usize = 8;
 
 #[derive(Default)]
@@ -48,6 +54,28 @@ impl Handler for Orderbook {
     #[inline]
     fn handle_cancel(&mut self, order_id: OrderId) -> Option<Order> {
         self.remove(&order_id)
+    }
+}
+
+impl Watched for Orderbook {
+    #[inline]
+    fn peek(&self, side: &OrderSide) -> Option<&Order> {
+        match side {
+            OrderSide::Ask => self.asks.first_key_value().map(|(_, level)| level)?,
+            OrderSide::Bid => self.bids.first_key_value().map(|(_, level)| level)?,
+        }
+        .front()
+        .and_then(|order_id| self.orders.get(order_id))
+    }
+
+    #[inline]
+    fn peek_mut(&mut self, side: &OrderSide) -> Option<&mut Order> {
+        match side {
+            OrderSide::Ask => self.asks.first_key_value().map(|(_, level)| level)?,
+            OrderSide::Bid => self.bids.first_key_value().map(|(_, level)| level)?,
+        }
+        .front()
+        .and_then(|order_id| self.orders.get_mut(order_id))
     }
 }
 
@@ -115,16 +143,6 @@ impl Orderbook {
         };
 
         Some(order)
-    }
-
-    #[inline]
-    fn peek_mut(&mut self, side: &OrderSide) -> Option<&mut Order> {
-        match side {
-            OrderSide::Ask => self.asks.first_key_value().map(|(_, level)| level)?,
-            OrderSide::Bid => self.bids.first_key_value().map(|(_, level)| level)?,
-        }
-        .front()
-        .and_then(|order_id| self.orders.get_mut(order_id))
     }
 
     #[inline]
