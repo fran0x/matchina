@@ -35,7 +35,7 @@ pub enum OrderRequest {
         order_id: u64,
         pair: CompactString,
         side: OrderSide,
-        limit_price: Decimal, // for market orders wrap in Option
+        limit_price: Option<Decimal>, // for market orders use None
         quantity: Decimal,
     },
     Cancel {
@@ -130,6 +130,20 @@ impl Order {
             type_: OrderType::Limit {
                 limit_price,
                 time_in_force: Default::default(),
+            },
+            order_quantity: quantity,
+            filled_quantity: 0.into(),
+            status: OrderStatus::Open,
+        }
+    }
+
+    #[inline]
+    pub fn market_order(id: OrderId, side: OrderSide, quantity: OrderQuantity) -> Self {
+        Self {
+            id,
+            side,
+            type_: OrderType::Market {
+                all_or_none: Default::default(),
             },
             order_quantity: quantity,
             filled_quantity: 0.into(),
@@ -272,7 +286,11 @@ pub mod util {
                     } else {
                         OrderSide::Bid
                     },
-                    limit_price: rng.gen_range(100..10_000).into(),
+                    limit_price: if rng.gen_bool(0.8) {
+                        Some(rng.gen_range(100..10_000).into())
+                    } else {
+                        None
+                    },
                     quantity: rng.gen_range(100..10_000).into(),
                 }
             }

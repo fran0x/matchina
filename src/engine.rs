@@ -32,7 +32,11 @@ impl Engine {
                 limit_price,
                 quantity,
             } => {
-                let order = Order::limit_order(order_id.into(), side, limit_price, quantity);
+                let order = if let Some(limit_price) = limit_price {
+                    Order::limit_order(order_id.into(), side, limit_price, quantity)
+                } else {
+                    Order::market_order(order_id.into(), side, quantity)
+                };
                 let _ = self.orderbook.handle_create(order);
             }
             OrderRequest::Cancel { order_id } => {
