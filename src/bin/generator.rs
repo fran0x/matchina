@@ -6,7 +6,7 @@ use exchange::order::util::generate;
 
 fn main() -> Result<()> {
     let mut stdout = io::stdout();
-    let range = 1..=10_000_000;
+    let range = 1..=10;
     for order in generate(range) {
         let order = serde_json::to_string(&order).ok().unwrap();
         writeln!(stdout, "{}", order)?;

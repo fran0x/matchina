@@ -1,6 +1,7 @@
 use anyhow::Result;
 use compact_str::CompactString;
 use thiserror::Error;
+use tracing::info;
 
 use crate::{
     order::{Order, OrderRequest},
@@ -23,6 +24,7 @@ impl Engine {
 
     #[inline]
     pub fn process(&mut self, order_request: OrderRequest) -> Result<(), EngineError> {
+        info!("{order_request}");
         match order_request {
             OrderRequest::Create {
                 account_id: _,

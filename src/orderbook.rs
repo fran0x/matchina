@@ -6,7 +6,10 @@ use std::{
 use indexmap::IndexMap;
 use thiserror::Error;
 
-use crate::order::{Order, OrderId, OrderPrice, OrderSide};
+use crate::{
+    order::{Order, OrderId, OrderPrice, OrderSide},
+    trade::{Trade, TradeId},
+};
 
 pub trait Handler {
     fn handle_create(&mut self, order: Order) -> Result<(), OrderbookError>;
@@ -15,6 +18,10 @@ pub trait Handler {
 }
 
 pub trait Watched {
+    fn orders(&self) -> usize;
+
+    fn trades(&self) -> usize;
+
     fn peek(&self, side: &OrderSide) -> Option<&Order>;
 
     fn peek_mut(&mut self, side: &OrderSide) -> Option<&mut Order>;
@@ -27,13 +34,18 @@ pub struct Orderbook {
     orders: IndexMap<OrderId, Order>,
     asks: BTreeMap<OrderPrice, VecDeque<OrderId>>,
     bids: BTreeMap<Reverse<OrderPrice>, VecDeque<OrderId>>,
+    trades: IndexMap<TradeId, Trade>,
 }
 
 impl Handler for Orderbook {
     fn handle_create(&mut self, mut order: Order) -> Result<(), OrderbookError> {
         let opposite = !order.side();
+
+        let mut trades = vec![];
         while let (false, Some(top_order)) = (order.is_closed(), self.peek_mut(&opposite)) {
-            let Some(_trade) = order.trade(top_order) else {
+            if let Some(trade) = order.trade(top_order) {
+                trades.push(trade);
+            } else {
                 break; // no match with top order, move on
             };
 
@@ -41,6 +53,10 @@ impl Handler for Orderbook {
                 // if top order is completed remove from the book
                 self.pop(&opposite).expect("no top order found");
             }
+        }
+
+        for trade in trades {
+            self.trades.insert(trade.id(), trade);
         }
 
         // insert incoming order if is bookable and is not completed
@@ -58,6 +74,16 @@ impl Handler for Orderbook {
 }
 
 impl Watched for Orderbook {
+    #[inline]
+    fn orders(&self) -> usize {
+        self.orders.len()
+    }
+
+    #[inline]
+    fn trades(&self) -> usize {
+        self.trades.len()
+    }
+
     #[inline]
     fn peek(&self, side: &OrderSide) -> Option<&Order> {
         match side {

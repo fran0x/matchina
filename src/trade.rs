@@ -1,10 +1,29 @@
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::order::{Order, OrderError, OrderId, OrderPrice, OrderQuantity};
 
+#[derive(Clone, Copy, Debug, Hash, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TradeId(u64);
+
+impl TradeId {
+    #[inline]
+    pub fn new(trade_id: u64) -> Self {
+        Self(trade_id)
+    }
+}
+
+impl From<u64> for TradeId {
+    fn from(value: u64) -> TradeId {
+        TradeId::new(value)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Trade {
+    id: TradeId,
     taker: OrderId,
     maker: OrderId,
     price: OrderPrice,
@@ -26,12 +45,21 @@ impl Trade {
         taker.fill(traded)?;
         maker.fill(traded)?;
 
+        static TRADE_ID_GENERATOR: AtomicU64 = AtomicU64::new(0);
+        let trade_id = TRADE_ID_GENERATOR.fetch_add(1, Relaxed);
+
         Ok(Trade {
+            id: trade_id.into(),
             taker: taker.id(),
             maker: maker.id(),
             price,
             quantity: traded,
         })
+    }
+
+    #[inline]
+    pub fn id(&self) -> TradeId {
+        self.id
     }
 
     #[inline]

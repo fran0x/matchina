@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::{cmp::Ordering, fmt::Display};
 
 use compact_str::CompactString;
 use rust_decimal::Decimal;
@@ -43,11 +43,42 @@ pub enum OrderRequest {
     },
 }
 
+impl Display for OrderRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OrderRequest::Create {
+                account_id: _,
+                order_id,
+                pair: _,
+                side,
+                limit_price,
+                quantity,
+            } => match limit_price {
+                Some(limit_price) => write!(
+                    f,
+                    "[{side} LIMIT] order_id: {order_id}, limit_price: {limit_price}, quantity: {quantity}"
+                ),
+                None => write!(f, "[{side} MARKET] order_id: {order_id}, quantity: {quantity}"),
+            },
+            OrderRequest::Cancel { order_id } => write!(f, "[CANCEL] order_id: {order_id}"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum OrderSide {
     Ask,
     Bid,
+}
+
+impl Display for OrderSide {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OrderSide::Ask => write!(f, "SELL"),
+            OrderSide::Bid => write!(f, "BUY"),
+        }
+    }
 }
 
 impl std::ops::Not for OrderSide {
@@ -270,7 +301,8 @@ pub enum OrderError {
 
 pub mod util {
     use compact_str::{format_compact, CompactString};
-    use rand::Rng;
+    use rand::{rngs::ThreadRng, Rng};
+    use rust_decimal::Decimal;
 
     use super::{OrderRequest, OrderSide};
 
@@ -286,7 +318,7 @@ pub mod util {
                 }
             } else {
                 OrderRequest::Create {
-                    account_id: format_compact!("{}", rng.gen_range(1..100)),
+                    account_id: format_compact!("{}", rng.gen_range(1..10)),
                     order_id: i as u64,
                     pair: CompactString::new_inline(DEFAULT_PAIR),
                     side: if rng.gen_bool(0.5) {
@@ -295,13 +327,17 @@ pub mod util {
                         OrderSide::Bid
                     },
                     limit_price: if rng.gen_bool(0.8) {
-                        Some(rng.gen_range(100..10_000).into())
+                        Some(random_decimal(&mut rng))
                     } else {
                         None
                     },
-                    quantity: rng.gen_range(100..10_000).into(),
+                    quantity: random_decimal(&mut rng),
                 }
             }
         })
+    }
+
+    pub fn random_decimal(rng: &mut ThreadRng) -> Decimal {
+        Decimal::new(rng.gen_range(10000..1_000_000), 2)
     }
 }

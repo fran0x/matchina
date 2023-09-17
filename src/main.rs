@@ -12,6 +12,7 @@ use crossbeam_channel::unbounded;
 use exchange::{
     engine::Engine,
     order::{util::DEFAULT_PAIR, OrderRequest},
+    summary::compute,
 };
 use tracing::{error, info};
 use tracing_appender::non_blocking::WorkerGuard;
@@ -62,8 +63,7 @@ impl FromStr for Output {
 fn main() -> Result<()> {
     // Initialize logging
     let _guard = init_logs();
-
-    info!("Matching engine started!");
+    info!("Matching Engine started!");
 
     // Parse command line arguments
     let args = Args::parse();
@@ -78,11 +78,24 @@ fn main() -> Result<()> {
     let mut engine = Engine::new(&args.pair);
 
     // Process all the order requests
-    process(&mut engine, rx)?;
+    let start = Instant::now();
+    while let Ok(order_request) = rx.recv() {
+        if let Err(error) = engine.process(order_request) {
+            error!("Error processing order request: {}", error);
+        }
+    }
+    let elapsed = (Instant::now() - start).as_millis();
+    info!("Matching Engine finished in {elapsed} milliseconds");
 
-    // Report results
-    info!("Matching engine finished!");
-    report(args.output.unwrap_or_default())?;
+    // Report summary
+    let orderbook = engine.orderbook();
+    match args.output.unwrap_or_default() {
+        Output::Stdout => {
+            let summary = compute(orderbook);
+            info!("{summary}");
+        }
+        Output::File(..) => unimplemented!(),
+    }
 
     Ok(())
 }
@@ -133,37 +146,4 @@ fn read(input_source: Input, tx: crossbeam_channel::Sender<OrderRequest>) -> std
 
         Ok(())
     })
-}
-
-fn process(engine: &mut Engine, rx: crossbeam_channel::Receiver<OrderRequest>) -> Result<()> {
-    let mut i = 0.0;
-    let start = Instant::now();
-
-    while let Ok(order_request) = rx.recv() {
-        if let Err(error) = engine.process(order_request) {
-            error!("Error processing order request: {}", error);
-        }
-        i += 1.0;
-    }
-
-    let end = Instant::now();
-    let elapsed = end - start;
-
-    info!("Matching engine finished!");
-    info!(
-        "{:.0} order requests processed in {} milliseconds",
-        i,
-        elapsed.as_millis()
-    );
-
-    Ok(())
-}
-
-fn report(output_destination: Output) -> Result<()> {
-    match output_destination {
-        Output::Stdout => (),
-        Output::File(..) => unimplemented!(),
-    }
-
-    Ok(())
 }
