@@ -1,4 +1,7 @@
-use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+use std::{
+    fmt::Display,
+    sync::atomic::{AtomicU64, Ordering::Relaxed},
+};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -65,6 +68,16 @@ impl Trade {
     #[inline]
     pub fn price(&self) -> OrderPrice {
         self.price
+    }
+}
+
+impl Display for Trade {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "TRADE[{:?}] [taker:{:?}|maker:{:?}] {}@{}",
+            self.id, self.taker, self.maker, self.quantity, self.price
+        )
     }
 }
 

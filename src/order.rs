@@ -54,11 +54,8 @@ impl Display for OrderRequest {
                 limit_price,
                 quantity,
             } => match limit_price {
-                Some(limit_price) => write!(
-                    f,
-                    "[{side} LIMIT] order_id: {order_id}, limit_price: {limit_price}, quantity: {quantity}"
-                ),
-                None => write!(f, "[{side} MARKET] order_id: {order_id}, quantity: {quantity}"),
+                Some(limit_price) => write!(f, "ORDER[{order_id}] {side} {quantity}@{limit_price}"),
+                None => write!(f, "ORDER[{order_id}] {side} {quantity}@MARKET"),
             },
             OrderRequest::Cancel { order_id } => write!(f, "[CANCEL] order_id: {order_id}"),
         }
@@ -250,6 +247,7 @@ impl Order {
         }
     }
 
+    #[inline]
     pub fn fill(&mut self, quantity: OrderQuantity) -> Result<(), OrderError> {
         if quantity > self.remaining() {
             return Err(OrderError::Overfill {
@@ -266,6 +264,15 @@ impl Order {
         };
 
         Ok(())
+    }
+
+    #[inline]
+    pub fn cancel(&mut self) {
+        match self.status() {
+            OrderStatus::Open => self.status = OrderStatus::Cancelled,
+            OrderStatus::Partial => self.status = OrderStatus::Closed,
+            _ => (),
+        }
     }
 }
 
@@ -287,6 +294,44 @@ impl PartialOrd for Order {
         };
 
         Some(ord)
+    }
+}
+
+pub trait Flags {
+    fn is_all_or_none(&self) -> bool;
+
+    fn is_immediate_or_cancel(&self) -> bool;
+
+    fn is_post_only(&self) -> bool;
+}
+
+impl Flags for Order {
+    #[inline]
+    fn is_all_or_none(&self) -> bool {
+        match self.type_ {
+            OrderType::Market { all_or_none }
+            | OrderType::Limit {
+                time_in_force: TimeInForce::ImmediateOrCancel { all_or_none },
+                ..
+            } => all_or_none,
+            _ => false,
+        }
+    }
+
+    #[inline]
+    fn is_immediate_or_cancel(&self) -> bool {
+        matches!(
+            self.type_,
+            OrderType::Limit {
+                time_in_force: TimeInForce::ImmediateOrCancel { .. },
+                ..
+            } | OrderType::Market { .. }
+        )
+    }
+
+    #[inline]
+    fn is_post_only(&self) -> bool {
+        matches!(self.type_, OrderType::Limit { time_in_force: TimeInForce::GoodTilCancel { post_only }, .. } if post_only)
     }
 }
 

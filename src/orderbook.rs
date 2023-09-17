@@ -17,14 +17,12 @@ pub trait Handler {
     fn handle_cancel(&mut self, order_id: OrderId) -> Option<Order>;
 }
 
-pub trait Watched {
-    fn orders(&self) -> usize;
-
-    fn trades(&self) -> usize;
-
+pub trait Scanner {
     fn peek(&self, side: &OrderSide) -> Option<&Order>;
 
     fn peek_mut(&mut self, side: &OrderSide) -> Option<&mut Order>;
+
+    fn matches(&self, order: &Order) -> Vec<&mut Order>;
 }
 
 const DEFAULT_LEVEL_SIZE: usize = 8;
@@ -56,6 +54,7 @@ impl Handler for Orderbook {
         }
 
         for trade in trades {
+            //info!("{trade}");
             self.trades.insert(trade.id(), trade);
         }
 
@@ -73,17 +72,7 @@ impl Handler for Orderbook {
     }
 }
 
-impl Watched for Orderbook {
-    #[inline]
-    fn orders(&self) -> usize {
-        self.orders.len()
-    }
-
-    #[inline]
-    fn trades(&self) -> usize {
-        self.trades.len()
-    }
-
+impl Scanner for Orderbook {
     #[inline]
     fn peek(&self, side: &OrderSide) -> Option<&Order> {
         match side {
@@ -102,6 +91,32 @@ impl Watched for Orderbook {
         }
         .front()
         .and_then(|order_id| self.orders.get_mut(order_id))
+    }
+
+    #[inline]
+    fn matches(&self, incoming_order: &Order) -> Vec<&mut Order> {
+        let side = incoming_order.side();
+        let order_map = match side {
+            OrderSide::Ask => &self.asks,
+            OrderSide::Bid => &self.bids,
+        };
+    
+        let mut remaining = incoming_order.remaining();
+    
+        let matched_orders = order_map
+            .values()
+            .flat_map(|level| level.iter())
+            .filter_map(|order_id| self.orders.get(order_id))
+            .filter(|order| incoming_order.matches(order))
+            .take_while(|order| remaining > OrderAmount::zero())
+            .map(|order| {
+                let order_amount = order.remaining().min(remaining);
+                remaining -= order_amount;
+                order.clone()
+            })
+            .collect::<Vec<Order>>();
+    
+        matched_orders
     }
 }
 
