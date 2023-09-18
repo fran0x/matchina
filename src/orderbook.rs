@@ -22,7 +22,7 @@ pub trait Scanner {
 
     fn peek_mut(&mut self, side: &OrderSide) -> Option<&mut Order>;
 
-    fn matches(&self, order: &Order) -> Vec<&mut Order>;
+    fn matches(&self, order: &Order) -> (OrderAmount, Vec<&mut Order>);
 }
 
 const DEFAULT_LEVEL_SIZE: usize = 8;
@@ -94,20 +94,20 @@ impl Scanner for Orderbook {
     }
 
     #[inline]
-    fn matches(&self, incoming_order: &Order) -> Vec<&mut Order> {
-        let side = incoming_order.side();
+    fn matches(&self, taker: &Order) -> (OrderAmount, Vec<&mut Order>) {
+        let side = taker.side();
         let order_map = match side {
             OrderSide::Ask => &self.asks,
             OrderSide::Bid => &self.bids,
         };
     
-        let mut remaining = incoming_order.remaining();
+        let mut remaining = taker.remaining();
     
         let matched_orders = order_map
             .values()
             .flat_map(|level| level.iter())
-            .filter_map(|order_id| self.orders.get(order_id))
-            .filter(|order| incoming_order.matches(order))
+            .filter_map(|order_id| self.orders.get_mut(order_id))
+            .filter(|maker| taker.matches(maker))
             .take_while(|order| remaining > OrderAmount::zero())
             .map(|order| {
                 let order_amount = order.remaining().min(remaining);
@@ -116,7 +116,7 @@ impl Scanner for Orderbook {
             })
             .collect::<Vec<Order>>();
     
-        matched_orders
+        (remaining, matched_orders)
     }
 }
 
