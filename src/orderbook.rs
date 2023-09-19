@@ -4,10 +4,12 @@ use std::{
 };
 
 use indexmap::IndexMap;
+use num::Zero;
 use thiserror::Error;
+use tracing::info;
 
 use crate::{
-    order::{Order, OrderId, OrderPrice, OrderSide},
+    order::{Order, OrderId, OrderPrice, OrderQuantity, OrderSide},
     trade::{Trade, TradeId},
 };
 
@@ -22,7 +24,7 @@ pub trait Scanner {
 
     fn peek_mut(&mut self, side: &OrderSide) -> Option<&mut Order>;
 
-    fn matches(&self, order: &Order) -> (OrderAmount, Vec<&mut Order>);
+    fn matches(&mut self, order: &Order) -> (OrderQuantity, Vec<&mut Order>);
 }
 
 const DEFAULT_LEVEL_SIZE: usize = 8;
@@ -93,29 +95,25 @@ impl Scanner for Orderbook {
         .and_then(|order_id| self.orders.get_mut(order_id))
     }
 
-    #[inline]
-    fn matches(&self, taker: &Order) -> (OrderAmount, Vec<&mut Order>) {
-        let side = taker.side();
-        let order_map = match side {
-            OrderSide::Ask => &self.asks,
-            OrderSide::Bid => &self.bids,
-        };
-    
+    fn matches(&mut self, taker: &Order) -> (OrderQuantity, Vec<&mut Order>) {
+        let mut matched_orders = vec!();
         let mut remaining = taker.remaining();
-    
-        let matched_orders = order_map
-            .values()
-            .flat_map(|level| level.iter())
-            .filter_map(|order_id| self.orders.get_mut(order_id))
-            .filter(|maker| taker.matches(maker))
-            .take_while(|order| remaining > OrderAmount::zero())
-            .map(|order| {
-                let order_amount = order.remaining().min(remaining);
-                remaining -= order_amount;
-                order.clone()
-            })
-            .collect::<Vec<Order>>();
-    
+
+        for (_, order_ids) in &self.asks {
+            for order_id in order_ids {
+                if let Some(order) = self.orders.get_mut(order_id) {
+                    if taker.matches(order) {
+                        let traded = order.remaining().min(remaining);
+                        remaining -= traded;
+                        matched_orders.push(order);
+                    }
+                }
+            }
+            if remaining == OrderQuantity::zero() {
+                break;
+            }
+        }
+
         (remaining, matched_orders)
     }
 }
