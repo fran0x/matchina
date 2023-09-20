@@ -5,8 +5,6 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::trade::Trade;
-
 #[derive(Clone, Copy, Debug, Hash, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OrderId(u64);
 
@@ -195,6 +193,11 @@ impl Order {
     }
 
     #[inline]
+    pub fn can_trade(&self, other: &Self) -> OrderQuantity {
+        self.remaining().min(other.remaining())
+    }
+
+    #[inline]
     fn status(&self) -> OrderStatus {
         self.status
     }
@@ -221,12 +224,6 @@ impl Order {
             self.status(),
             OrderStatus::Cancelled | OrderStatus::Closed | OrderStatus::Completed
         )
-    }
-
-    #[inline]
-    pub fn trade(&mut self, other: &mut Self) -> Option<Trade> {
-        let (taker, maker) = (self, other);
-        Trade::new(taker, maker).ok()
     }
 
     #[inline]

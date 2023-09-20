@@ -35,12 +35,7 @@ pub struct Trade {
 
 impl Trade {
     #[inline]
-    pub fn new(taker: &mut Order, maker: &mut Order) -> Result<Trade, TradeError> {
-        if !taker.matches(maker) {
-            Err(TradeError::PriceNotMatching)?;
-        }
-
-        let traded = taker.remaining().min(maker.remaining());
+    pub fn new(taker: &mut Order, maker: &mut Order, traded: OrderQuantity) -> Result<Trade, TradeError> {
         let price = maker
             .limit_price()
             .expect("maker should be a limit order, always with a limit price");
@@ -105,7 +100,8 @@ mod test {
         let mut maker = Order::limit_order(maker_id, OrderSide::Ask, 100.into(), 10.into());
 
         // call Trade::new and expect it to succeed
-        let result = Trade::new(&mut taker, &mut maker);
+        let quantity = taker.can_trade(&maker);
+        let result = Trade::new(&mut taker, &mut maker, quantity);
         assert!(result.is_ok());
 
         // check that the orders have been filled correctly
