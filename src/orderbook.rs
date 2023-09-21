@@ -1,6 +1,7 @@
 use std::{
     cmp::Reverse,
-    collections::{btree_map::Entry, BTreeMap, VecDeque}, ops::{Deref, DerefMut},
+    collections::{btree_map::Entry, BTreeMap, VecDeque},
+    ops::{Deref, DerefMut},
 };
 
 use indexmap::IndexMap;
@@ -30,7 +31,10 @@ pub struct PriceLevel {
 
 impl Default for PriceLevel {
     fn default() -> Self {
-        Self { order_ids: VecDeque::with_capacity(DEFAULT_LEVEL_SIZE), quantity: Decimal::ZERO }
+        Self {
+            order_ids: VecDeque::with_capacity(DEFAULT_LEVEL_SIZE),
+            quantity: Decimal::ZERO,
+        }
     }
 }
 
@@ -62,7 +66,8 @@ impl PriceLevel {
         }
 
         let level_price = level.quantity;
-        match order.limit_price() { // limit price == limit order
+        match order.limit_price() {
+            // limit price == limit order
             Some(limit_price) => match order.side() {
                 OrderSide::Ask => limit_price <= level_price,
                 OrderSide::Bid => limit_price >= level_price,
@@ -75,6 +80,44 @@ impl PriceLevel {
         self.quantity != OrderQuantity::zero()
     }
 }
+
+macro_rules! match_order {
+    ($self:ident, $incoming_order:ident, $trades:ident, $order_ladder:ident, $opposite_ladder:ident) => {
+        let mut drained_levels = 0;
+        for (_, price_level) in $opposite_ladder.iter_mut() {
+            if $incoming_order.is_closed() || !price_level.matches(&$incoming_order) {
+                break;
+            }
+
+            let mut total_traded = OrderQuantity::ZERO;
+            let mut total_trades = 0;
+
+            for order_id in price_level.iter_mut() {
+                let limit_order = $self.orders.get_mut(order_id).unwrap();
+                let traded = $incoming_order.can_trade(limit_order);
+
+                let trade = Trade::new(&mut $incoming_order, limit_order, traded).expect("there should be a trade");
+                $trades.push(trade);
+
+                total_traded += traded;
+                total_trades += 1;
+            }
+
+            price_level.quantity -= total_traded;
+            for _ in 0..total_trades {
+                price_level.pop_front();
+            }
+
+            if price_level.quantity == OrderQuantity::ZERO {
+                drained_levels += 1;
+            }
+        }
+        for _ in 0..drained_levels {
+            $opposite_ladder.pop_first();
+        }
+    };
+}
+
 #[derive(Default)]
 pub struct Orderbook {
     orders: IndexMap<OrderId, Order>,
@@ -93,80 +136,24 @@ impl Handler for Orderbook {
         .front()
         .and_then(|order_id| self.orders.get(order_id))
     }
-    
+
     #[inline]
     fn handle_create(&mut self, mut incoming_order: Order) -> Result<(), OrderbookError> {
         let opposite = !incoming_order.side();
 
-        let mut trades = vec![];
+        let mut trades: Vec<Trade> = vec![];
         match opposite {
             OrderSide::Ask => {
-                let mut drained_levels = 0;
-                let ladder = &mut self.asks;
-                for (_, price_level) in ladder.iter_mut() {
-                    if incoming_order.is_closed() || !price_level.matches(&incoming_order) {
-                        break;
-                    }
-
-                    let mut total_traded = OrderQuantity::ZERO;
-                    let mut total_trades = 0;
-
-                    for order_id in price_level.iter_mut() {
-                        let limit_order = self.orders.get_mut(order_id).unwrap();
-                        let traded = incoming_order.can_trade(limit_order);
-                        let trade = Trade::new(&mut incoming_order, limit_order, traded).expect("there should be a trade");
-                        trades.push(trade);
-
-                        total_traded += traded;
-                        total_trades += 1;
-                    }
-                    
-                    price_level.quantity -= total_traded;
-                    for _ in 0..total_trades {
-                        price_level.pop_front();
-                    }
-                    if price_level.quantity == OrderQuantity::ZERO {
-                        drained_levels += 1;
-                    }
-                }
-                for _ in 0..drained_levels {
-                    ladder.pop_first();
-                }    
+                let order_ladder =  &mut self.bids;
+                let opposite_ladder = &mut self.asks;
+                match_order!(self, incoming_order, trades, order_ladder, opposite_ladder);
             }
             OrderSide::Bid => {
-                let mut drained_levels = 0;
-                let ladder = &mut self.bids;
-                for (_, price_level) in ladder.iter_mut() {
-                    if incoming_order.is_closed() || !price_level.matches(&incoming_order) {
-                        break;
-                    }
-
-                    let mut total_traded = OrderQuantity::ZERO;
-                    let mut total_trades = 0;
-
-                    for order_id in price_level.iter_mut() {
-                        let limit_order = self.orders.get_mut(order_id).unwrap();
-                        let traded = incoming_order.can_trade(limit_order);
-                        let trade = Trade::new(&mut incoming_order, limit_order, traded).expect("there should be a trade");
-                        trades.push(trade);
-
-                        total_traded += traded;
-                        total_trades += 1;
-                    }
-                    
-                    price_level.quantity -= total_traded;
-                    for _ in 0..total_trades {
-                        price_level.pop_front();
-                    }
-                    if price_level.quantity == OrderQuantity::ZERO {
-                        drained_levels += 1;
-                    }
-                }
-                for _ in 0..drained_levels {
-                    ladder.pop_first();
-                }  
+                let order_ladder = &mut self.asks;
+                let opposite_ladder = &mut self.bids;
+                match_order!(self, incoming_order, trades, order_ladder, opposite_ladder);
             }
-        }
+        };
 
         for trade in trades {
             self.trades.insert(trade.id(), trade);
@@ -193,10 +180,7 @@ impl Orderbook {
             .limit_price()
             .expect("only limit orders with limit price can be inserted");
         let price_level = match order.side() {
-            OrderSide::Ask => self
-                .asks
-                .entry(limit_price)
-                .or_insert_with(|| PriceLevel::default()),
+            OrderSide::Ask => self.asks.entry(limit_price).or_insert_with(|| PriceLevel::default()),
             OrderSide::Bid => self
                 .bids
                 .entry(Reverse(limit_price))
