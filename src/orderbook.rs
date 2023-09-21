@@ -14,15 +14,11 @@ use crate::{
 };
 
 pub trait Handler {
+    fn peek_top(&self, side: &OrderSide) -> Option<&Order>;
+
     fn handle_create(&mut self, order: Order) -> Result<(), OrderbookError>;
 
     fn handle_cancel(&mut self, order_id: OrderId) -> Option<Order>;
-}
-
-pub trait Scanner {
-    fn peek(&self, side: &OrderSide) -> Option<&Order>;
-
-    fn peek_mut(&mut self, side: &OrderSide) -> Option<&mut Order>;
 }
 
 const DEFAULT_LEVEL_SIZE: usize = 8;
@@ -53,6 +49,10 @@ impl DerefMut for PriceLevel {
 }
 
 impl PriceLevel {
+    pub fn can_trade(&self, order: &Order) -> bool {
+        self.quantity.min(order.remaining()) != OrderQuantity::ZERO
+    }
+
     #[inline]
     pub fn matches(&self, order: &Order) -> bool {
         let level = self;
@@ -84,32 +84,97 @@ pub struct Orderbook {
 }
 
 impl Handler for Orderbook {
-    fn handle_create(&mut self, mut order: Order) -> Result<(), OrderbookError> {
-        let opposite = !order.side();
+    #[inline]
+    fn peek_top(&self, side: &OrderSide) -> Option<&Order> {
+        match side {
+            OrderSide::Ask => self.asks.first_key_value().map(|(_, level)| level)?,
+            OrderSide::Bid => self.bids.first_key_value().map(|(_, level)| level)?,
+        }
+        .front()
+        .and_then(|order_id| self.orders.get(order_id))
+    }
+    
+    #[inline]
+    fn handle_create(&mut self, mut incoming_order: Order) -> Result<(), OrderbookError> {
+        let opposite = !incoming_order.side();
 
         let mut trades = vec![];
-        while let (false, Some(price_level)) = (order.is_closed(), self.peek_(&opposite)) {
-            for order_id in & price_level.order_ids {
-                let maker = self.orders.get(order_id).unwrap();
-                let traded = order.can_trade(maker);
-                let trade = Trade::new(&mut order, maker, traded).expect("there should be a trade");
-                trades.push(trade);
-                
-                price_level.quantity -= traded;
-                if maker.is_closed() {
-                    price_level.pop_front().expect("msg");
+        match opposite {
+            OrderSide::Ask => {
+                let mut drained_levels = 0;
+                let ladder = &mut self.asks;
+                for (_, price_level) in ladder.iter_mut() {
+                    if incoming_order.is_closed() || !price_level.matches(&incoming_order) {
+                        break;
+                    }
+
+                    let mut total_traded = OrderQuantity::ZERO;
+                    let mut total_trades = 0;
+
+                    for order_id in price_level.iter_mut() {
+                        let limit_order = self.orders.get_mut(order_id).unwrap();
+                        let traded = incoming_order.can_trade(limit_order);
+                        let trade = Trade::new(&mut incoming_order, limit_order, traded).expect("there should be a trade");
+                        trades.push(trade);
+
+                        total_traded += traded;
+                        total_trades += 1;
+                    }
+                    
+                    price_level.quantity -= total_traded;
+                    for _ in 0..total_trades {
+                        price_level.pop_front();
+                    }
+                    if price_level.quantity == OrderQuantity::ZERO {
+                        drained_levels += 1;
+                    }
                 }
+                for _ in 0..drained_levels {
+                    ladder.pop_first();
+                }    
+            }
+            OrderSide::Bid => {
+                let mut drained_levels = 0;
+                let ladder = &mut self.bids;
+                for (_, price_level) in ladder.iter_mut() {
+                    if incoming_order.is_closed() || !price_level.matches(&incoming_order) {
+                        break;
+                    }
+
+                    let mut total_traded = OrderQuantity::ZERO;
+                    let mut total_trades = 0;
+
+                    for order_id in price_level.iter_mut() {
+                        let limit_order = self.orders.get_mut(order_id).unwrap();
+                        let traded = incoming_order.can_trade(limit_order);
+                        let trade = Trade::new(&mut incoming_order, limit_order, traded).expect("there should be a trade");
+                        trades.push(trade);
+
+                        total_traded += traded;
+                        total_trades += 1;
+                    }
+                    
+                    price_level.quantity -= total_traded;
+                    for _ in 0..total_trades {
+                        price_level.pop_front();
+                    }
+                    if price_level.quantity == OrderQuantity::ZERO {
+                        drained_levels += 1;
+                    }
+                }
+                for _ in 0..drained_levels {
+                    ladder.pop_first();
+                }  
             }
         }
 
         for trade in trades {
-            //info!("{trade}");
             self.trades.insert(trade.id(), trade);
         }
 
         // insert incoming order if is bookable and is not completed
-        if order.is_bookable() && !order.is_closed() {
-            self.insert(order);
+        if incoming_order.is_bookable() && !incoming_order.is_closed() {
+            self.insert(incoming_order);
         }
 
         Ok(())
@@ -121,37 +186,7 @@ impl Handler for Orderbook {
     }
 }
 
-impl Scanner for Orderbook {
-    #[inline]
-    fn peek(&self, side: &OrderSide) -> Option<&Order> {
-        match side {
-            OrderSide::Ask => self.asks.first_key_value().map(|(_, level)| level)?,
-            OrderSide::Bid => self.bids.first_key_value().map(|(_, level)| level)?,
-        }
-        .front()
-        .and_then(|order_id| self.orders.get(order_id))
-    }
-
-    #[inline]
-    fn peek_mut(&mut self, side: &OrderSide) -> Option<&mut Order> {
-        match side {
-            OrderSide::Ask => self.asks.iter_mut().next().map(|(_, level)| level)?,
-            OrderSide::Bid => self.bids.iter_mut().next().map(|(_, level)| level)?,
-        }
-        .front()
-        .and_then(|order_id| self.orders.get_mut(order_id))
-    }
-}
-
 impl Orderbook {
-    #[inline]
-    fn peek_(&mut self, side: &OrderSide) -> Option<&mut PriceLevel> {
-        match side {
-            OrderSide::Ask => self.asks.iter_mut().next().map(|(_, level)| level),
-            OrderSide::Bid => self.bids.iter_mut().next().map(|(_, level)| level),
-        }
-    }
-
     #[inline]
     fn insert(&mut self, order: Order) {
         let limit_price = order

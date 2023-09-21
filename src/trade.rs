@@ -87,7 +87,7 @@ pub enum TradeError {
 #[cfg(test)]
 mod test {
     use crate::{
-        order::{Order, OrderId, OrderSide},
+        order::{Order, OrderId, OrderSide, OrderQuantity},
         trade::Trade,
     };
 
@@ -101,7 +101,7 @@ mod test {
 
         // call Trade::new and expect it to succeed
         let quantity = taker.can_trade(&maker);
-        let result = Trade::new(&mut taker, &mut maker, quantity);
+        let result = Trade::new(&mut taker, &mut maker, OrderQuantity::ZERO);
         assert!(result.is_ok());
 
         // check that the orders have been filled correctly
