@@ -24,6 +24,94 @@ pub trait Handler {
 
 const DEFAULT_LEVEL_SIZE: usize = 8;
 
+trait Ladder: Deref + DerefMut {
+    fn insert(&mut self, order: &Order) -> &mut Self;
+
+    fn remove(&mut self, order: &Order) -> &mut Self;
+}
+
+#[derive(Default)]
+struct LadderWrapper<T>(T);
+
+impl<T> Deref for LadderWrapper<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> DerefMut for LadderWrapper<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Ladder for LadderWrapper<BTreeMap<Reverse<OrderPrice>, PriceLevel>> {
+    fn insert(&mut self, order: &Order) -> &mut Self {
+        let limit_price = order.limit_price().expect("");
+        let price_level = self.0.entry(Reverse(limit_price)).or_insert_with(|| PriceLevel::default());
+        
+        price_level.quantity += order.remaining();
+        price_level.push_back(order.id());
+
+        self
+    }
+
+    fn remove(&mut self, order: &Order) -> &mut Self {
+        let limit_price = order.limit_price().expect("");
+        let Entry::Occupied(mut price_level) = self.0.entry(Reverse(limit_price)) else {
+            unreachable!();
+        };
+
+        if price_level.get().len() == 1 {
+            price_level.remove();
+        } else {
+            let price_level = price_level.get_mut();
+            price_level.quantity -= order.remaining();
+            if let Some(idx) = price_level.iter().position(|&order_id| order.id() == order_id) {
+                price_level.remove(idx);
+            }
+        }
+
+        self
+    }
+}
+
+impl Ladder for LadderWrapper<BTreeMap<OrderPrice, PriceLevel>> {
+    fn insert(&mut self, order: &Order) -> &mut Self {
+        let limit_price = order.limit_price().expect("a limit price is required to insert in the ladder");
+        let price_level = self.0.entry(limit_price).or_insert_with(|| PriceLevel::default());
+        
+        price_level.quantity += order.remaining();
+        price_level.push_back(order.id());
+
+        self
+    }
+
+    fn remove(&mut self, order: &Order) -> &mut Self {
+        let limit_price = order.limit_price().expect("a limit price is required to remove in the ladder");
+        let Entry::Occupied(mut price_level) = self.0.entry(limit_price) else {
+            unreachable!();
+        };
+
+        if price_level.get().len() == 1 {
+            price_level.remove();
+        } else {
+            let price_level = price_level.get_mut();
+            price_level.quantity -= order.remaining();
+            if let Some(idx) = price_level.iter().position(|&order_id| order.id() == order_id) {
+                price_level.remove(idx);
+            }
+        }
+
+        self
+    }
+}
+
+type AsksLadder = LadderWrapper<BTreeMap<OrderPrice, PriceLevel>>;
+type BidsLadder = LadderWrapper<BTreeMap<Reverse<OrderPrice>, PriceLevel>>;
+
 pub struct PriceLevel {
     order_ids: VecDeque<OrderId>,
     quantity: OrderQuantity,
@@ -53,6 +141,12 @@ impl DerefMut for PriceLevel {
 }
 
 impl PriceLevel {
+    #[inline]
+    fn is_closed(&self) -> bool {
+        self.quantity != OrderQuantity::zero()
+    }
+
+    #[inline]
     pub fn can_trade(&self, order: &Order) -> bool {
         self.quantity.min(order.remaining()) != OrderQuantity::ZERO
     }
@@ -75,15 +169,13 @@ impl PriceLevel {
             None => true, // no limit price == market order
         }
     }
-
-    fn is_closed(&self) -> bool {
-        self.quantity != OrderQuantity::zero()
-    }
 }
 
 macro_rules! match_order {
-    ($self:ident, $incoming_order:ident, $trades:ident, $order_ladder:ident, $opposite_ladder:ident) => {
+    ($incoming_order:ident, $orders:ident, $trades:ident, $order_ladder:ident, $opposite_ladder:ident) => {
+        let mut trades: Vec<Trade> = vec![];
         let mut drained_levels = 0;
+
         for (_, price_level) in $opposite_ladder.iter_mut() {
             if $incoming_order.is_closed() || !price_level.matches(&$incoming_order) {
                 break;
@@ -93,11 +185,11 @@ macro_rules! match_order {
             let mut total_trades = 0;
 
             for order_id in price_level.iter_mut() {
-                let limit_order = $self.orders.get_mut(order_id).unwrap();
+                let limit_order = $orders.get_mut(order_id).unwrap();
                 let traded = $incoming_order.can_trade(limit_order);
 
                 let trade = Trade::new(&mut $incoming_order, limit_order, traded).expect("there should be a trade");
-                $trades.push(trade);
+                trades.push(trade);
 
                 total_traded += traded;
                 total_trades += 1;
@@ -115,14 +207,24 @@ macro_rules! match_order {
         for _ in 0..drained_levels {
             $opposite_ladder.pop_first();
         }
+
+        // record trades
+        for trade in trades {
+            $trades.insert(trade.id(), trade);
+        }
+
+        // insert limit order in the book
+        if !$incoming_order.is_closed() && $incoming_order.is_bookable() {
+            $order_ladder.insert(& $incoming_order);
+        }
     };
 }
 
 #[derive(Default)]
 pub struct Orderbook {
+    asks: AsksLadder,
+    bids: BidsLadder,
     orders: IndexMap<OrderId, Order>,
-    asks: BTreeMap<OrderPrice, PriceLevel>,
-    bids: BTreeMap<Reverse<OrderPrice>, PriceLevel>,
     trades: IndexMap<TradeId, Trade>,
 }
 
@@ -138,104 +240,40 @@ impl Handler for Orderbook {
     }
 
     #[inline]
-    fn handle_create(&mut self, mut incoming_order: Order) -> Result<(), OrderbookError> {
-        let opposite = !incoming_order.side();
+    fn handle_create(&mut self, mut order: Order) -> Result<(), OrderbookError> {
+        let orders = &mut self.orders;
+        let trades = &mut self.trades;
 
-        let mut trades: Vec<Trade> = vec![];
-        match opposite {
+        match order.side() {
             OrderSide::Ask => {
-                let order_ladder =  &mut self.bids;
-                let opposite_ladder = &mut self.asks;
-                match_order!(self, incoming_order, trades, order_ladder, opposite_ladder);
-            }
-            OrderSide::Bid => {
                 let order_ladder = &mut self.asks;
                 let opposite_ladder = &mut self.bids;
-                match_order!(self, incoming_order, trades, order_ladder, opposite_ladder);
+                match_order!(order, orders, trades, order_ladder, opposite_ladder);
+            }
+            OrderSide::Bid => {
+                let order_ladder = &mut self.bids;
+                let opposite_ladder = &mut self.asks;
+                match_order!(order, orders, trades, order_ladder, opposite_ladder);
             }
         };
-
-        for trade in trades {
-            self.trades.insert(trade.id(), trade);
-        }
-
-        // insert incoming order if is bookable and is not completed
-        if incoming_order.is_bookable() && !incoming_order.is_closed() {
-            self.insert(incoming_order);
-        }
 
         Ok(())
     }
 
     #[inline]
     fn handle_cancel(&mut self, order_id: OrderId) -> Option<Order> {
-        self.remove(&order_id)
-    }
-}
-
-impl Orderbook {
-    #[inline]
-    fn insert(&mut self, order: Order) {
-        let limit_price = order
-            .limit_price()
-            .expect("only limit orders with limit price can be inserted");
-        let price_level = match order.side() {
-            OrderSide::Ask => self.asks.entry(limit_price).or_insert_with(|| PriceLevel::default()),
-            OrderSide::Bid => self
-                .bids
-                .entry(Reverse(limit_price))
-                .or_insert_with(|| PriceLevel::default()),
-        };
-
-        price_level.quantity += order.remaining();
-        price_level.push_back(order.id());
-
-        self.orders.insert(order.id(), order);
-    }
-
-    #[inline]
-    fn remove(&mut self, order_id: &OrderId) -> Option<Order> {
-        let order = self.orders.remove(order_id)?;
-        let limit_price = order
-            .limit_price()
-            .expect("only limit orders with limit price can be removed");
+        let order = self.orders.remove(&order_id).expect("a limit order to cancel should be found");
 
         match order.side() {
             OrderSide::Ask => {
-                let Entry::Occupied(mut price_level) = self.asks.entry(limit_price) else {
-                    unreachable!();
-                };
-
-                // prevent dangling levels
-                if price_level.get().len() == 1 {
-                    price_level.remove().pop_front()
-                } else {
-                    price_level.get_mut().quantity -= order.remaining();
-                    price_level
-                        .get()
-                        .iter()
-                        .position(|&order_id| order.id() == order_id)
-                        .and_then(|idx| price_level.get_mut().remove(idx))
-                }
+                let order_ladder = &mut self.asks;
+                order_ladder.remove(& order);
             }
             OrderSide::Bid => {
-                let Entry::Occupied(mut price_level) = self.bids.entry(Reverse(limit_price)) else {
-                    unreachable!();
-                };
-
-                // prevent dangling levels
-                if price_level.get().len() == 1 {
-                    price_level.remove().pop_front()
-                } else {
-                    price_level.get_mut().quantity -= order.remaining();
-                    price_level
-                        .get()
-                        .iter()
-                        .position(|&order_id| order.id() == order_id)
-                        .and_then(|idx| price_level.get_mut().remove(idx))
-                }
+                let order_ladder = &mut self.bids;
+                order_ladder.remove(& order);
             }
-        };
+        }
 
         Some(order)
     }
