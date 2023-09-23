@@ -190,10 +190,10 @@ macro_rules! match_order {
             for order_id in price_level.iter_mut() {
                 let limit_order = $orders
                     .get_mut(order_id)
-                    .expect("a limit order is expected in the price level");
+                    .ok_or(OrderbookError::OrderToMatchNotFound(*order_id))?;
                 let traded = $incoming_order.can_trade(limit_order);
 
-                let trade = Trade::new(&mut $incoming_order, limit_order, traded).expect("there should be a trade");
+                let trade = Trade::new(&mut $incoming_order, limit_order, traded).map_err(OrderbookError::TradeError)?;
                 trades.push(trade);
 
                 total_traded += traded;
@@ -478,6 +478,7 @@ mod test {
         }
     }
 
+    // TODO fix the logic that's breaking this test and add more tests but for market orders
     mod limit_orders_match {
         use super::*;
 
@@ -487,6 +488,7 @@ mod test {
             assert_ne!(ask_100_at_015.side(), bid_099_at_015.side());
             assert!(bid_099_at_015.matches(&ask_100_at_015));
     
+            assert!(orderbook.handle_create(ask_100_at_015).is_ok());
             assert!(orderbook.handle_create(bid_099_at_015).is_ok());
     
             // the ask is completed and no bid is left
