@@ -93,7 +93,7 @@ mod test {
     };
 
     #[test]
-    fn match_limit_orders() {
+    fn test_match() {
         // create two mock limit orders with matching prices
         let taker_id: OrderId = 1.into();
         let maker_id: OrderId = 2.into();
@@ -102,15 +102,15 @@ mod test {
 
         // call Trade::new and expect it to succeed
         let quantity = taker.can_trade(&maker);
-        let result = Trade::new(&mut taker, &mut maker, quantity);
-        assert!(result.is_ok());
+        let trade = Trade::new(&mut taker, &mut maker, quantity);
+        assert!(trade.is_ok());
 
         // check that the orders have been filled correctly
         assert_eq!(taker.remaining(), 5.into());
         assert_eq!(maker.remaining(), 0.into());
 
         // check the details of the trade
-        let trade = result.unwrap();
+        let trade = trade.unwrap();
         assert_eq!(trade.taker, taker_id);
         assert_eq!(trade.maker, maker_id);
         assert_eq!(trade.quantity, 10.into());

@@ -407,36 +407,36 @@ mod test {
 
     use super::*;
 
-    // convention for order ids: side (bid = 0, ask = 1), 3-digit quantity, 3-digit price (for market orders always 999)
+    // convention for order ids: 3-digit side (bid = 900, ask = 901), 3-digit quantity, 3-digit price (for market orders always 999)
 
     #[fixture]
     fn ask_050_at_013() -> Order {
-        let order_id = OrderId::new(1_050_013);
-        Order::limit_order(order_id, OrderSide::Ask, 050.into(), 013.into())
+        let order_id = OrderId::new(901_050_013);
+        Order::limit_order(order_id, OrderSide::Ask, 50.into(), 13.into())
     }
 
     #[fixture]
     fn ask_070_at_014() -> Order {
-        let order_id = OrderId::new(1_070_014);
-        Order::limit_order(order_id, OrderSide::Ask, 070.into(), 014.into())
+        let order_id = OrderId::new(901_070_014);
+        Order::limit_order(order_id, OrderSide::Ask, 70.into(), 14.into())
     }
 
     #[fixture]
     fn bid_020_at_014() -> Order {
-        let order_id = OrderId::new(0_020_014);
-        Order::limit_order(order_id, OrderSide::Bid, 020.into(), 014.into())
+        let order_id = OrderId::new(900_020_014);
+        Order::limit_order(order_id, OrderSide::Bid, 20.into(), 14.into())
     }
 
     #[fixture]
     fn bid_040_at_013() -> Order {
-        let order_id = OrderId::new(0_040_013);
-        Order::limit_order(order_id, OrderSide::Bid, 040.into(), 013.into())
+        let order_id = OrderId::new(900_040_013);
+        Order::limit_order(order_id, OrderSide::Bid, 40.into(), 13.into())
     }
 
     #[fixture]
     fn bid_040_at_market() -> Order {
-        let order_id = OrderId::new(0_040_999);
-        Order::market_order(order_id, OrderSide::Bid, 040.into())
+        let order_id = OrderId::new(900_040_999);
+        Order::market_order(order_id, OrderSide::Bid, 40.into())
     }
 
     mod limit_orders {
@@ -457,21 +457,21 @@ mod test {
         fn test_match_same_price(ask_070_at_014: Order, bid_020_at_014: Order) {
             // first confirm prices are the same and then confirm orders are matching
             assert_opposite_price(&ask_070_at_014, &bid_020_at_014, Ordering::Equal);
-            assert_eq!(ask_070_at_014.matches(&bid_020_at_014), true);
+            assert!(ask_070_at_014.matches(&bid_020_at_014));
         }
 
         #[rstest]
         fn test_match_crossing_price(ask_050_at_013: Order, bid_020_at_014: Order) {
             // first confirm prices are the same and then confirm orders are matching
             assert_opposite_price(&ask_050_at_013, &bid_020_at_014, Ordering::Less);
-            assert_eq!(ask_050_at_013.matches(&bid_020_at_014), true);
+            assert!(ask_050_at_013.matches(&bid_020_at_014));
         }
 
         #[rstest]
         fn test_no_match(ask_070_at_014: Order, bid_040_at_013: Order) {
             // first confirm ask price is higher than bid price and then confirm orders are not matching
             assert_opposite_price(&ask_070_at_014, &bid_040_at_013, Ordering::Greater);
-            assert_eq!(ask_070_at_014.matches(&bid_040_at_013), false);
+            assert!(!ask_070_at_014.matches(&bid_040_at_013));
         }
     }
 
@@ -485,9 +485,9 @@ mod test {
             assert_eq!(bid_040_at_market.limit_price(), None);
 
             // if the market order is the taker then it should match
-            assert_eq!(bid_040_at_market.matches(&ask_070_at_014), true);
+            assert!(bid_040_at_market.matches(&ask_070_at_014));
             // if the market order is the maker then it should not match (this should never happen)
-            assert_eq!(ask_070_at_014.matches(&bid_040_at_market), false);
+            assert!(!ask_070_at_014.matches(&bid_040_at_market));
         }
     }
 }

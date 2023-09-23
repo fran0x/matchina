@@ -362,7 +362,7 @@ mod test {
     use super::*;
     use crate::order::{Order, OrderSide};
 
-    // convention for order ids: side (bid = 0, ask = 1), 3-digit quantity, 3-digit price (for market orders always 999)
+    // convention for order ids: 3-digit side (bid = 900, ask = 901), 3-digit quantity, 3-digit price (for market orders always 999)
 
     #[fixture]
     fn orderbook() -> Orderbook {
@@ -371,38 +371,38 @@ mod test {
 
     #[fixture]
     fn ask_100_at_015() -> Order {
-        let order_id = OrderId::new(1_100_015);
-        Order::limit_order(order_id, OrderSide::Ask, 100.into(), 015.into())
+        let order_id = OrderId::new(901_100_015);
+        Order::limit_order(order_id, OrderSide::Ask, 100.into(), 15.into())
     }
 
     #[fixture]
     fn ask_080_at_015() -> Order {
-        let order_id = OrderId::new(1_080_015);
-        Order::limit_order(order_id, OrderSide::Ask, 080.into(), 015.into())
+        let order_id = OrderId::new(901_080_015);
+        Order::limit_order(order_id, OrderSide::Ask, 80.into(), 15.into())
     }
 
     #[fixture]
     fn ask_070_at_014() -> Order {
-        let order_id = OrderId::new(1_070_014);
-        Order::limit_order(order_id, OrderSide::Ask, 070.into(), 014.into())
+        let order_id = OrderId::new(901_070_014);
+        Order::limit_order(order_id, OrderSide::Ask, 70.into(), 14.into())
     }
 
     #[fixture]
     fn bid_025_at_014() -> Order {
-        let order_id = OrderId::new(0_025_014);
-        Order::limit_order(order_id, OrderSide::Bid, 025.into(), 014.into())
+        let order_id = OrderId::new(900_025_014);
+        Order::limit_order(order_id, OrderSide::Bid, 25.into(), 14.into())
     }
 
     #[fixture]
     fn bid_099_at_015() -> Order {
-        let order_id = OrderId::new(0_099_015);
-        Order::limit_order(order_id, OrderSide::Bid, 099.into(), 015.into())
+        let order_id = OrderId::new(900_099_015);
+        Order::limit_order(order_id, OrderSide::Bid, 99.into(), 15.into())
     }
 
     #[fixture]
     fn bid_020_at_016() -> Order {
-        let order_id = OrderId::new(0_020_016);
-        Order::limit_order(order_id, OrderSide::Bid, 020.into(), 016.into())
+        let order_id = OrderId::new(900_020_016);
+        Order::limit_order(order_id, OrderSide::Bid, 20.into(), 16.into())
     }
 
     mod limit_orders_no_match {
