@@ -349,7 +349,7 @@ impl Flags for Order {
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq)]
 pub enum OrderError {
     #[error("fill exceeds remaning amount (fill={}, remaining={})", .fill, .remaining)]
     Overfill {

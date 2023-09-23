@@ -145,7 +145,7 @@ impl DerefMut for PriceLevel {
 impl PriceLevel {
     #[inline]
     fn is_closed(&self) -> bool {
-        self.quantity != OrderQuantity::zero()
+        self.quantity == OrderQuantity::zero()
     }
 
     #[inline]
@@ -154,19 +154,19 @@ impl PriceLevel {
     }
 
     #[inline]
-    pub fn matches(&self, order: &Order) -> bool {
+    pub fn matches(&self, limit_price: OrderPrice, order: &Order) -> bool {
         let level = self;
 
         if level.is_closed() || order.is_closed() {
             return false;
         }
 
-        let level_price = level.quantity;
+        let level_limit_price = limit_price;
         match order.limit_price() {
             // limit price == limit order
-            Some(limit_price) => match order.side() {
-                OrderSide::Ask => limit_price <= level_price,
-                OrderSide::Bid => limit_price >= level_price,
+            Some(order_limit_price) => match order.side() {
+                OrderSide::Ask => order_limit_price <= level_limit_price,
+                OrderSide::Bid => order_limit_price >= level_limit_price,
             },
             None => true, // no limit price == market order
         }
@@ -184,30 +184,32 @@ macro_rules! match_order {
         let mut trades: Vec<Trade> = vec![];
         let mut drained_levels = 0;
 
-        for (_, price_level) in $opposite_ladder.iter_mut() {
-            if $incoming_order.is_closed() || !price_level.matches(&$incoming_order) {
+        for (limit_price, price_level) in $opposite_ladder.iter_mut() {
+            if $incoming_order.is_closed() || !price_level.matches(*limit_price, &$incoming_order) {
                 break;
             }
 
             let mut total_traded = OrderQuantity::ZERO;
-            let mut total_trades = 0;
+            let mut orders_completed = 0;
 
             for order_id in price_level.iter_mut() {
-                let limit_order = $orders
+                let maker = $orders
                     .get_mut(order_id)
                     .ok_or(OrderbookError::OrderToMatchNotFound(*order_id))?;
-                let traded = $incoming_order.can_trade(limit_order);
+                let traded = $incoming_order.can_trade(maker);
 
                 let trade =
-                    Trade::new(&mut $incoming_order, limit_order, traded).map_err(OrderbookError::TradeError)?;
+                    Trade::new(&mut $incoming_order, maker, traded).map_err(OrderbookError::TradeError)?;
                 trades.push(trade);
 
                 total_traded += traded;
-                total_trades += 1;
+                if maker.is_closed() {
+                    orders_completed += 1;
+                }
             }
 
             price_level.quantity -= total_traded;
-            for _ in 0..total_trades {
+            for _ in 0..orders_completed {
                 price_level.pop_front();
             }
 
@@ -253,6 +255,10 @@ impl Orderbook {
 
     #[inline]
     pub fn handle_create(&mut self, mut order: Order) -> Result<(), OrderbookError> {
+        if self.orders.contains_key(&order.id()) {
+            return Err(OrderbookError::OrderDuplicated(order.id()));
+        }
+
         let orders = &mut self.orders;
         let trades = &mut self.trades;
 
@@ -264,29 +270,31 @@ impl Orderbook {
                 let mut new_trades: Vec<Trade> = vec![];
                 let mut drained_levels = 0;
 
-                for (_, price_level) in opposite_ladder.iter_mut() {
-                    if order.is_closed() || !price_level.matches(&order) {
+                for (limit_price, price_level) in opposite_ladder.iter_mut() {
+                    if order.is_closed() || !price_level.matches(limit_price.0, &order) {
                         break;
                     }
 
                     let mut total_traded = OrderQuantity::ZERO;
-                    let mut total_trades = 0;
+                    let mut orders_completed = 0;
 
                     for order_id in price_level.iter_mut() {
-                        let limit_order = orders
+                        let maker = orders
                             .get_mut(order_id)
                             .ok_or(OrderbookError::OrderToMatchNotFound(*order_id))?;
-                        let traded = order.can_trade(limit_order);
+                        let traded = order.can_trade(maker);
 
-                        let trade = Trade::new(&mut order, limit_order, traded).map_err(OrderbookError::TradeError)?;
+                        let trade = Trade::new(&mut order, maker, traded).map_err(OrderbookError::TradeError)?;
                         new_trades.push(trade);
 
                         total_traded += traded;
-                        total_trades += 1;
+                        if maker.is_closed() {
+                            orders_completed += 1;
+                        }
                     }
 
                     price_level.quantity -= total_traded;
-                    for _ in 0..total_trades {
+                    for _ in 0..orders_completed {
                         price_level.pop_front();
                     }
 
@@ -341,8 +349,10 @@ impl Orderbook {
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq)]
 pub enum OrderbookError {
+    #[error("an order with the same ID has been handled before! {0}")]
+    OrderDuplicated(OrderId),
     #[error("order cannot be inserted into the book with no limit price! {0}")]
     OrderToInsertWithNoLimitPrice(Order),
     #[error("order cannot be removed from the book with no limit price! {0}")]
@@ -439,6 +449,15 @@ mod test {
         }
 
         #[rstest]
+        fn test_handle_create_duplicate_order(mut orderbook: Orderbook, ask_100_at_015: Order) {
+            assert!(orderbook.handle_create(ask_100_at_015).is_ok());
+            assert_eq!(
+                orderbook.handle_create(ask_100_at_015).unwrap_err(),
+                OrderbookError::OrderDuplicated(ask_100_at_015.id())
+            );
+        }
+
+        #[rstest]
         fn test_handle_create_same_level(mut orderbook: Orderbook, ask_100_at_015: Order, ask_080_at_015: Order) {
             // same side same price
             assert_eq!(ask_100_at_015.side(), ask_080_at_015.side());
@@ -500,12 +519,48 @@ mod test {
             assert_ne!(ask_100_at_015.side(), bid_099_at_015.side());
             assert!(bid_099_at_015.matches(&ask_100_at_015));
 
-            assert!(orderbook.handle_create(ask_100_at_015).is_ok());
+            let expected = ask_100_at_015.remaining() - bid_099_at_015.remaining();
             assert!(orderbook.handle_create(bid_099_at_015).is_ok());
+            assert!(orderbook.handle_create(ask_100_at_015).is_ok());
 
-            // the ask is completed and no bid is left
-            assert_eq!(orderbook.peek_top(&OrderSide::Ask), Some(&ask_100_at_015));
+            // the ask is still open but the bid is gone
+            match orderbook.peek_top(&OrderSide::Ask) {
+                Some(top_ask) => {
+                    assert_eq!(top_ask, &ask_100_at_015);
+                    assert_eq!(top_ask.remaining(), expected);
+                }
+                None => panic!(),
+            }
             assert_eq!(orderbook.peek_top(&OrderSide::Bid), None);
+        }
+
+        #[rstest]
+        fn test_handle_create_match_two_orders(
+            mut orderbook: Orderbook,
+            ask_100_at_015: Order,
+            bid_099_at_015: Order,
+            bid_020_at_016: Order,
+        ) {
+            // different side AND matching
+            assert_ne!(ask_100_at_015.side(), bid_099_at_015.side());
+            assert_ne!(ask_100_at_015.side(), bid_020_at_016.side());
+            assert!(bid_099_at_015.matches(&ask_100_at_015));
+            assert!(bid_020_at_016.matches(&ask_100_at_015));
+
+            let expected = bid_099_at_015.remaining() - (ask_100_at_015.remaining() - bid_020_at_016.remaining());
+            assert!(orderbook.handle_create(bid_099_at_015).is_ok());
+            assert!(orderbook.handle_create(bid_020_at_016).is_ok());
+            assert!(orderbook.handle_create(ask_100_at_015).is_ok());
+
+            // the ask is gone and in the bid one is remaining
+            match orderbook.peek_top(&OrderSide::Bid) {
+                Some(top_bid) => {
+                    assert_eq!(top_bid, &bid_099_at_015);
+                    assert_eq!(top_bid.remaining(), expected);
+                }
+                None => panic!(),
+            }
+            assert_eq!(orderbook.peek_top(&OrderSide::Ask), None);
         }
     }
 }

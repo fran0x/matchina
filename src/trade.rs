@@ -77,7 +77,7 @@ impl Display for Trade {
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq)]
 pub enum TradeError {
     #[error("maker should be a limit order, always with a limit price! {0}")]
     MakerWithoutLimitPrice(OrderId),
