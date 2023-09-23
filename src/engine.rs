@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::{
     order::{Order, OrderRequest},
-    orderbook::{Handler, Orderbook},
+    orderbook::Orderbook,
 };
 
 pub struct Engine {

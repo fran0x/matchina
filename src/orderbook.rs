@@ -1,7 +1,7 @@
 use std::{
     cmp::Reverse,
     collections::{btree_map::Entry, BTreeMap, VecDeque},
-    ops::{Deref, DerefMut},
+    ops::{Deref, DerefMut}, fmt::Display,
 };
 
 use indexmap::IndexMap;
@@ -13,14 +13,6 @@ use crate::{
     order::{Order, OrderId, OrderPrice, OrderQuantity, OrderSide},
     trade::{Trade, TradeId},
 };
-
-pub trait Handler {
-    fn peek_top(&self, side: &OrderSide) -> Option<&Order>;
-
-    fn handle_create(&mut self, order: Order) -> Result<(), OrderbookError>;
-
-    fn handle_cancel(&mut self, order_id: OrderId) -> Option<Order>;
-}
 
 const DEFAULT_LEVEL_SIZE: usize = 8;
 
@@ -84,6 +76,7 @@ impl Ladder for LadderWrapper<BTreeMap<OrderPrice, PriceLevel>> {
         let price_level = self.0.entry(limit_price).or_insert_with(|| PriceLevel::default());
         
         price_level.quantity += order.remaining();
+        price_level.push_back(order.id());
         price_level.push_back(order.id());
 
         self
@@ -171,6 +164,12 @@ impl PriceLevel {
     }
 }
 
+impl Display for PriceLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} [{:?}]", self.quantity, self.order_ids)
+    }
+}
+
 macro_rules! match_order {
     ($incoming_order:ident, $orders:ident, $trades:ident, $order_ladder:ident, $opposite_ladder:ident) => {
         let mut trades: Vec<Trade> = vec![];
@@ -185,7 +184,7 @@ macro_rules! match_order {
             let mut total_trades = 0;
 
             for order_id in price_level.iter_mut() {
-                let limit_order = $orders.get_mut(order_id).unwrap();
+                let limit_order = $orders.get_mut(order_id).expect("a limit order is expected in the price level");
                 let traded = $incoming_order.can_trade(limit_order);
 
                 let trade = Trade::new(&mut $incoming_order, limit_order, traded).expect("there should be a trade");
@@ -228,9 +227,9 @@ pub struct Orderbook {
     trades: IndexMap<TradeId, Trade>,
 }
 
-impl Handler for Orderbook {
+impl Orderbook {
     #[inline]
-    fn peek_top(&self, side: &OrderSide) -> Option<&Order> {
+    pub fn peek_top(&self, side: &OrderSide) -> Option<&Order> {
         match side {
             OrderSide::Ask => self.asks.first_key_value().map(|(_, level)| level)?,
             OrderSide::Bid => self.bids.first_key_value().map(|(_, level)| level)?,
@@ -240,7 +239,7 @@ impl Handler for Orderbook {
     }
 
     #[inline]
-    fn handle_create(&mut self, mut order: Order) -> Result<(), OrderbookError> {
+    pub fn handle_create(&mut self, mut order: Order) -> Result<(), OrderbookError> {
         let orders = &mut self.orders;
         let trades = &mut self.trades;
 
@@ -248,7 +247,51 @@ impl Handler for Orderbook {
             OrderSide::Ask => {
                 let order_ladder = &mut self.asks;
                 let opposite_ladder = &mut self.bids;
-                match_order!(order, orders, trades, order_ladder, opposite_ladder);
+
+                let mut new_trades: Vec<Trade> = vec![];
+                let mut drained_levels = 0;
+        
+                for (_, price_level) in opposite_ladder.iter_mut() {
+                    if order.is_closed() || !price_level.matches(&order) {
+                        break;
+                    }
+        
+                    let mut total_traded = OrderQuantity::ZERO;
+                    let mut total_trades = 0;
+        
+                    for order_id in price_level.iter_mut() {
+                        let limit_order = orders.get_mut(order_id).expect("a limit order is expected in the price level");
+                        let traded = order.can_trade(limit_order);
+        
+                        let trade = Trade::new(&mut order, limit_order, traded).expect("there should be a trade");
+                        new_trades.push(trade);
+        
+                        total_traded += traded;
+                        total_trades += 1;
+                    }
+        
+                    price_level.quantity -= total_traded;
+                    for _ in 0..total_trades {
+                        price_level.pop_front();
+                    }
+        
+                    if price_level.quantity == OrderQuantity::ZERO {
+                        drained_levels += 1;
+                    }
+                }
+                for _ in 0..drained_levels {
+                    opposite_ladder.pop_first();
+                }
+        
+                // record trades
+                for trade in new_trades {
+                    trades.insert(trade.id(), trade);
+                }
+        
+                // insert limit order in the book
+                if !order.is_closed() && order.is_bookable() {
+                    order_ladder.insert(&order);
+                }
             }
             OrderSide::Bid => {
                 let order_ladder = &mut self.bids;
@@ -261,7 +304,7 @@ impl Handler for Orderbook {
     }
 
     #[inline]
-    fn handle_cancel(&mut self, order_id: OrderId) -> Option<Order> {
+    pub fn handle_cancel(&mut self, order_id: OrderId) -> Option<Order> {
         let order = self.orders.remove(&order_id).expect("a limit order to cancel should be found");
 
         match order.side() {
@@ -283,4 +326,23 @@ impl Handler for Orderbook {
 pub enum OrderbookError {
     #[error("not cool")]
     PriceNotMatching,
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::order::{Order, OrderSide};
+
+    #[test]
+    fn test_handle_create() {
+        let mut orderbook = Orderbook::default();
+
+        let ask_id: OrderId = 1.into();
+        let ask = Order::limit_order(ask_id, OrderSide::Ask, 100.into(), 15.into());
+
+        let result = orderbook.handle_create(ask);
+
+        assert!(result.is_ok());
+        assert_eq!(orderbook.peek_top(&OrderSide::Ask), Some(&ask));
+    }
 }

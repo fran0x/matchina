@@ -1,4 +1,8 @@
-use crate::{order::Flags, order::Order, orderbook::{Orderbook, Scanner}};
+use crate::{
+    order::Flags,
+    order::Order,
+    orderbook::{Orderbook, Scanner},
+};
 
 pub trait Policy {
     fn enforce(&self, order: &mut Order, orderbook: &Orderbook);
@@ -9,14 +13,9 @@ pub struct AllOrNone;
 impl Policy for AllOrNone {
     #[inline]
     fn enforce(&self, incoming_order: &mut Order, exchange: &Orderbook) {
-
-        
         if incoming_order.is_all_or_none()
             && incoming_order.remaining()
-                > exchange.volume_with(
-                    incoming_order.side().opposite(),
-                    |order| order.matches(&incoming_order),
-                )
+                > exchange.volume_with(incoming_order.side().opposite(), |order| order.matches(&incoming_order))
         {
             incoming_order.cancel();
         }

@@ -3,7 +3,6 @@ use std::fmt::Display;
 use crate::{
     order::{OrderPrice, OrderSide},
     orderbook::Orderbook,
-    orderbook::Handler,
 };
 
 pub struct Summary {
