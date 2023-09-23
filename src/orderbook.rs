@@ -5,15 +5,15 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+use anyhow::Result;
 use indexmap::IndexMap;
 use num::Zero;
 use rust_decimal::Decimal;
 use thiserror::Error;
-use anyhow::Result;
 
 use crate::{
     order::{Order, OrderId, OrderPrice, OrderQuantity, OrderSide},
-    trade::{Trade, TradeId, TradeError},
+    trade::{Trade, TradeError, TradeId},
 };
 
 const DEFAULT_LEVEL_SIZE: usize = 8;
@@ -43,11 +43,10 @@ impl<T> DerefMut for LadderWrapper<T> {
 
 impl Ladder for LadderWrapper<BTreeMap<Reverse<OrderPrice>, PriceLevel>> {
     fn insert(&mut self, order: &Order) -> Result<&mut Self, OrderbookError> {
-        let limit_price = order.limit_price().ok_or(OrderbookError::OrderToInsertWithNoLimitPrice(*order))?;
-        let price_level = self
-            .0
-            .entry(Reverse(limit_price))
-            .or_insert_with(|| PriceLevel::default());
+        let limit_price = order
+            .limit_price()
+            .ok_or(OrderbookError::OrderToInsertWithNoLimitPrice(*order))?;
+        let price_level = self.0.entry(Reverse(limit_price)).or_insert_with(PriceLevel::default);
 
         price_level.quantity += order.remaining();
         price_level.push_back(order.id());
@@ -56,7 +55,9 @@ impl Ladder for LadderWrapper<BTreeMap<Reverse<OrderPrice>, PriceLevel>> {
     }
 
     fn remove(&mut self, order: &Order) -> Result<&mut Self, OrderbookError> {
-        let limit_price = order.limit_price().ok_or(OrderbookError::OrderToRemoveWithNoLimitPrice(*order))?;
+        let limit_price = order
+            .limit_price()
+            .ok_or(OrderbookError::OrderToRemoveWithNoLimitPrice(*order))?;
         let Entry::Occupied(mut price_level) = self.0.entry(Reverse(limit_price)) else {
             unreachable!();
         };
@@ -77,8 +78,10 @@ impl Ladder for LadderWrapper<BTreeMap<Reverse<OrderPrice>, PriceLevel>> {
 
 impl Ladder for LadderWrapper<BTreeMap<OrderPrice, PriceLevel>> {
     fn insert(&mut self, order: &Order) -> Result<&mut Self, OrderbookError> {
-        let limit_price = order.limit_price().ok_or(OrderbookError::OrderToInsertWithNoLimitPrice(*order))?;
-        let price_level = self.0.entry(limit_price).or_insert_with(|| PriceLevel::default());
+        let limit_price = order
+            .limit_price()
+            .ok_or(OrderbookError::OrderToInsertWithNoLimitPrice(*order))?;
+        let price_level = self.0.entry(limit_price).or_insert_with(PriceLevel::default);
 
         price_level.quantity += order.remaining();
         price_level.push_back(order.id());
@@ -87,7 +90,9 @@ impl Ladder for LadderWrapper<BTreeMap<OrderPrice, PriceLevel>> {
     }
 
     fn remove(&mut self, order: &Order) -> Result<&mut Self, OrderbookError> {
-        let limit_price = order.limit_price().ok_or(OrderbookError::OrderToRemoveWithNoLimitPrice(*order))?;
+        let limit_price = order
+            .limit_price()
+            .ok_or(OrderbookError::OrderToRemoveWithNoLimitPrice(*order))?;
         let Entry::Occupied(mut price_level) = self.0.entry(limit_price) else {
             unreachable!();
         };
@@ -193,7 +198,8 @@ macro_rules! match_order {
                     .ok_or(OrderbookError::OrderToMatchNotFound(*order_id))?;
                 let traded = $incoming_order.can_trade(limit_order);
 
-                let trade = Trade::new(&mut $incoming_order, limit_order, traded).map_err(OrderbookError::TradeError)?;
+                let trade =
+                    Trade::new(&mut $incoming_order, limit_order, traded).map_err(OrderbookError::TradeError)?;
                 trades.push(trade);
 
                 total_traded += traded;
@@ -268,7 +274,8 @@ impl Orderbook {
 
                     for order_id in price_level.iter_mut() {
                         let limit_order = orders
-                            .get_mut(order_id).ok_or(OrderbookError::OrderToMatchNotFound(*order_id))?;
+                            .get_mut(order_id)
+                            .ok_or(OrderbookError::OrderToMatchNotFound(*order_id))?;
                         let traded = order.can_trade(limit_order);
 
                         let trade = Trade::new(&mut order, limit_order, traded).map_err(OrderbookError::TradeError)?;
@@ -406,71 +413,76 @@ mod test {
             // different side not matching
             assert_ne!(ask_100_at_015.side(), bid_025_at_014.side());
             assert!(!bid_025_at_014.matches(&ask_100_at_015));
-    
+
             assert!(orderbook.handle_create(ask_100_at_015).is_ok());
             assert!(orderbook.handle_create(bid_025_at_014).is_ok());
-    
+
             // confirm the top for bid and the top for ask are the ones inserted
             assert_eq!(orderbook.peek_top(&OrderSide::Ask), Some(&ask_100_at_015));
             assert_eq!(orderbook.peek_top(&OrderSide::Bid), Some(&bid_025_at_014));
         }
-    
+
         #[rstest]
         fn test_handle_cancel(mut orderbook: Orderbook, ask_100_at_015: Order, bid_025_at_014: Order) {
             // different side not matching
             assert_ne!(ask_100_at_015.side(), bid_025_at_014.side());
             assert!(!bid_025_at_014.matches(&ask_100_at_015));
-    
+
             let _ = orderbook.handle_create(ask_100_at_015);
             let _ = orderbook.handle_create(bid_025_at_014);
-    
+
             // cancel the ask then confirm the top ask is empty and the top bid remains, finally try to cancel the same again
             assert_eq!(orderbook.handle_cancel(ask_100_at_015.id()).ok(), Some(ask_100_at_015));
             assert_eq!(orderbook.peek_top(&OrderSide::Ask), None);
             assert_eq!(orderbook.peek_top(&OrderSide::Bid), Some(&bid_025_at_014));
             assert_eq!(orderbook.handle_cancel(ask_100_at_015.id()).ok(), None);
         }
-    
+
         #[rstest]
         fn test_handle_create_same_level(mut orderbook: Orderbook, ask_100_at_015: Order, ask_080_at_015: Order) {
             // same side same price
             assert_eq!(ask_100_at_015.side(), ask_080_at_015.side());
             assert_eq!(ask_100_at_015.limit_price(), ask_080_at_015.limit_price());
-    
+
             let _ = orderbook.handle_create(ask_100_at_015);
             let _ = orderbook.handle_create(ask_080_at_015);
-    
+
             // confirm the first ask is the one returned as top then cancel that one and confirm the other becomes the new top
             assert_eq!(orderbook.peek_top(&OrderSide::Ask), Some(&ask_100_at_015));
             assert_eq!(orderbook.handle_cancel(ask_100_at_015.id()).ok(), Some(ask_100_at_015));
             assert_eq!(orderbook.peek_top(&OrderSide::Ask), Some(&ask_080_at_015));
         }
-    
+
         #[rstest]
-        fn test_handle_create_different_ask_price(mut orderbook: Orderbook, ask_100_at_015: Order, ask_070_at_014: Order) {
+        fn test_handle_create_different_ask_price(
+            mut orderbook: Orderbook,
+            ask_100_at_015: Order,
+            ask_070_at_014: Order,
+        ) {
             // same side different price (second order is a better ask)
             assert_eq!(ask_100_at_015.side(), ask_070_at_014.side());
-            assert!(
-                ask_100_at_015.limit_price().unwrap() >
-                ask_070_at_014.limit_price().unwrap()
-            );
+            assert!(ask_100_at_015.limit_price().unwrap() > ask_070_at_014.limit_price().unwrap());
 
             // after next 2 lines we should have 2 ask levels with the second at the top
             let _ = orderbook.handle_create(ask_100_at_015);
             let _ = orderbook.handle_create(ask_070_at_014);
-    
+
             // confirm the second ask is the one returned as top then cancel that one and confirm the other becomes the new top
             assert_eq!(orderbook.peek_top(&OrderSide::Ask), Some(&ask_070_at_014));
             assert_eq!(orderbook.handle_cancel(ask_070_at_014.id()).ok(), Some(ask_070_at_014));
             assert_eq!(orderbook.peek_top(&OrderSide::Ask), Some(&ask_100_at_015));
         }
-    
+
         #[rstest]
-        fn test_handle_create_different_bid_price(mut orderbook: Orderbook, bid_099_at_015: Order, bid_020_at_016: Order) {
+        fn test_handle_create_different_bid_price(
+            mut orderbook: Orderbook,
+            bid_099_at_015: Order,
+            bid_020_at_016: Order,
+        ) {
             // after next 2 lines we should have 2 bid levels with the second at the top
             let _ = orderbook.handle_create(bid_099_at_015);
             let _ = orderbook.handle_create(bid_020_at_016);
-    
+
             // confirm the second bid is the one returned as top then cancel that one and confirm the other becomes the new top
             assert_eq!(orderbook.peek_top(&OrderSide::Bid), Some(&bid_020_at_016));
             assert_eq!(orderbook.handle_cancel(bid_020_at_016.id()).ok(), Some(bid_020_at_016));
@@ -487,10 +499,10 @@ mod test {
             // different side AND matching
             assert_ne!(ask_100_at_015.side(), bid_099_at_015.side());
             assert!(bid_099_at_015.matches(&ask_100_at_015));
-    
+
             assert!(orderbook.handle_create(ask_100_at_015).is_ok());
             assert!(orderbook.handle_create(bid_099_at_015).is_ok());
-    
+
             // the ask is completed and no bid is left
             assert_eq!(orderbook.peek_top(&OrderSide::Ask), Some(&ask_100_at_015));
             assert_eq!(orderbook.peek_top(&OrderSide::Bid), None);

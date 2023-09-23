@@ -449,7 +449,7 @@ mod test {
 
             let ask_price = ask.limit_price().unwrap();
             let bid_price = bid.limit_price().unwrap();
-    
+
             assert_eq!(ask_price.cmp(&bid_price), cmp);
         }
 
@@ -485,10 +485,9 @@ mod test {
             assert_eq!(bid_040_at_market.limit_price(), None);
 
             // if the market order is the taker then it should match
-            assert_eq!(bid_040_at_market.matches(&ask_070_at_014), true); 
-
+            assert_eq!(bid_040_at_market.matches(&ask_070_at_014), true);
             // if the market order is the maker then it should not match (this should never happen)
-            assert_eq!(ask_070_at_014.matches(&bid_040_at_market), false); 
+            assert_eq!(ask_070_at_014.matches(&bid_040_at_market), false);
         }
     }
 }

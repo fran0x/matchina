@@ -7,7 +7,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::order::{Order, OrderId, OrderPrice, OrderQuantity, OrderError};
+use crate::order::{Order, OrderError, OrderId, OrderPrice, OrderQuantity};
 
 #[derive(Clone, Copy, Debug, Hash, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TradeId(u64);
