@@ -96,8 +96,8 @@ mod test {
         // create two mock limit orders with matching prices
         let taker_id: OrderId = 1.into();
         let maker_id: OrderId = 2.into();
-        let mut taker = Order::limit_order(taker_id, OrderSide::Bid, 100.into(), 15.into());
-        let mut maker = Order::limit_order(maker_id, OrderSide::Ask, 100.into(), 10.into());
+        let mut taker = Order::limit_order(taker_id, OrderSide::Bid, 15.into(), 100.into());
+        let mut maker = Order::limit_order(maker_id, OrderSide::Ask, 10.into(), 100.into());
 
         // call Trade::new and expect it to succeed
         let quantity = taker.can_trade(&maker);
