@@ -215,6 +215,7 @@ macro_rules! match_order {
         // insert limit order in the book
         if !$incoming_order.is_closed() && $incoming_order.is_bookable() {
             $order_ladder.insert(& $incoming_order);
+            $orders.insert($incoming_order.id(), $incoming_order);
         }
     };
 }
@@ -291,6 +292,7 @@ impl Orderbook {
                 // insert limit order in the book
                 if !order.is_closed() && order.is_bookable() {
                     order_ladder.insert(&order);
+                    orders.insert(order.id(), order);
                 }
             }
             OrderSide::Bid => {
@@ -330,19 +332,65 @@ pub enum OrderbookError {
 
 #[cfg(test)]
 mod test {
+    use rstest::{rstest, fixture};
+
     use super::*;
     use crate::order::{Order, OrderSide};
 
-    #[test]
-    fn test_handle_create() {
-        let mut orderbook = Orderbook::default();
+    // convention for order ids: side (bid = 0, ask = 1), 3-digit quantity, 3-digit price
 
-        let ask_id: OrderId = 1.into();
-        let ask = Order::limit_order(ask_id, OrderSide::Ask, 100.into(), 15.into());
+    #[fixture]
+    fn orderbook() -> Orderbook {
+        Orderbook::default()
+    }
 
-        let result = orderbook.handle_create(ask);
+    #[fixture]
+    fn ask_100_at_015() -> Order {
+        let order_id = OrderId::new(1_100_015);
+        Order::limit_order(order_id, OrderSide::Ask, 100.into(), 015.into())
+    }
 
-        assert!(result.is_ok());
-        assert_eq!(orderbook.peek_top(&OrderSide::Ask), Some(&ask));
+    #[fixture]
+    fn ask_080_at_015() -> Order {
+        let order_id = OrderId::new(1_080_015);
+        Order::limit_order(order_id, OrderSide::Ask, 080.into(), 015.into())
+    }
+
+    #[fixture]
+    fn bid_099_at_015() -> Order {
+        let order_id = OrderId::new(0_099_015);
+        Order::limit_order(order_id, OrderSide::Bid, 099.into(), 015.into())
+    }
+
+    #[rstest]
+    fn test_handle_create(mut orderbook: Orderbook, ask_100_at_015: Order, bid_099_at_015: Order) {
+        assert!(orderbook.handle_create(ask_100_at_015).is_ok());
+        assert!(orderbook.handle_create(bid_099_at_015).is_ok());
+
+        // confirm the top for bid and the top for ask are the ones inserted
+        assert_eq!(orderbook.peek_top(&OrderSide::Ask), Some(&ask_100_at_015));
+        assert_eq!(orderbook.peek_top(&OrderSide::Bid), Some(&bid_099_at_015));
+    }
+
+    #[rstest]
+    fn test_handle_remove(mut orderbook: Orderbook, ask_100_at_015: Order, bid_099_at_015: Order) {
+        let _ = orderbook.handle_create(ask_100_at_015);
+        let _ = orderbook.handle_create(bid_099_at_015);
+
+        // cancel the ask then confirm the top ask is empty and the top bid remains
+        assert_eq!(orderbook.handle_cancel(ask_100_at_015.id()), Some(ask_100_at_015));
+        assert_eq!(orderbook.peek_top(&OrderSide::Ask), None);
+        assert_eq!(orderbook.peek_top(&OrderSide::Bid), Some(&bid_099_at_015));
+    }
+
+    #[rstest]
+    fn test_handle_create_same_level(mut orderbook: Orderbook, ask_100_at_015: Order, ask_080_at_015: Order) {
+        let _ = orderbook.handle_create(ask_100_at_015);
+        let _ = orderbook.handle_create(ask_080_at_015);
+
+        // confirm the first ask is the one returned as top then cancel that one and confirm the other becomes the new top
+        assert_eq!(orderbook.peek_top(&OrderSide::Ask), Some(&ask_100_at_015));
+        assert_eq!(orderbook.handle_cancel(ask_100_at_015.id()), Some(ask_100_at_015));
+        assert_eq!(orderbook.peek_top(&OrderSide::Ask), Some(&ask_080_at_015));
     }
 }
