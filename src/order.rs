@@ -299,6 +299,18 @@ impl PartialOrd for Order {
     }
 }
 
+impl Display for Order {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let order_id = self.id;
+        let side = self.side;
+        let quantity = self.order_quantity;
+        match self.limit_price() {
+            Some(limit_price) => write!(f, "ORDER[{order_id}] {side} {quantity}@{limit_price}"),
+            None => write!(f, "ORDER[{order_id}] {side} {quantity}@MARKET"),
+        }
+    }
+}
+
 pub trait Flags {
     fn is_all_or_none(&self) -> bool;
 

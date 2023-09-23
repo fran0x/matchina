@@ -3,10 +3,11 @@ use std::{
     sync::atomic::{AtomicU64, Ordering::Relaxed},
 };
 
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::order::{Order, OrderError, OrderId, OrderPrice, OrderQuantity};
+use crate::order::{Order, OrderId, OrderPrice, OrderQuantity, OrderError};
 
 #[derive(Clone, Copy, Debug, Hash, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TradeId(u64);
@@ -38,10 +39,10 @@ impl Trade {
     pub fn new(taker: &mut Order, maker: &mut Order, traded: OrderQuantity) -> Result<Trade, TradeError> {
         let price = maker
             .limit_price()
-            .expect("maker should be a limit order, always with a limit price");
+            .ok_or(TradeError::MakerWithoutLimitPrice(maker.id()))?;
 
-        taker.fill(traded)?;
-        maker.fill(traded)?;
+        taker.fill(traded).map_err(TradeError::OrderError)?;
+        maker.fill(traded).map_err(TradeError::OrderError)?;
 
         static TRADE_ID_GENERATOR: AtomicU64 = AtomicU64::new(0);
         let trade_id = TRADE_ID_GENERATOR.fetch_add(1, Relaxed);
@@ -78,8 +79,8 @@ impl Display for Trade {
 
 #[derive(Debug, Error)]
 pub enum TradeError {
-    #[error("prices do not match each other")]
-    PriceNotMatching,
+    #[error("maker should be a limit order, always with a limit price! {0}")]
+    MakerWithoutLimitPrice(OrderId),
     #[error("order error: {0}")]
     OrderError(#[from] OrderError),
 }

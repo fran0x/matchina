@@ -13,15 +13,15 @@ use anyhow::Result;
 
 use crate::{
     order::{Order, OrderId, OrderPrice, OrderQuantity, OrderSide},
-    trade::{Trade, TradeId},
+    trade::{Trade, TradeId, TradeError},
 };
 
 const DEFAULT_LEVEL_SIZE: usize = 8;
 
 trait Ladder: Deref + DerefMut {
-    fn insert(&mut self, order: &Order) -> &mut Self;
+    fn insert(&mut self, order: &Order) -> Result<&mut Self, OrderbookError>;
 
-    fn remove(&mut self, order: &Order) -> &mut Self;
+    fn remove(&mut self, order: &Order) -> Result<&mut Self, OrderbookError>;
 }
 
 #[derive(Default)]
@@ -42,8 +42,8 @@ impl<T> DerefMut for LadderWrapper<T> {
 }
 
 impl Ladder for LadderWrapper<BTreeMap<Reverse<OrderPrice>, PriceLevel>> {
-    fn insert(&mut self, order: &Order) -> &mut Self {
-        let limit_price = order.limit_price().expect("");
+    fn insert(&mut self, order: &Order) -> Result<&mut Self, OrderbookError> {
+        let limit_price = order.limit_price().ok_or(OrderbookError::OrderToInsertWithNoLimitPrice(*order))?;
         let price_level = self
             .0
             .entry(Reverse(limit_price))
@@ -52,11 +52,11 @@ impl Ladder for LadderWrapper<BTreeMap<Reverse<OrderPrice>, PriceLevel>> {
         price_level.quantity += order.remaining();
         price_level.push_back(order.id());
 
-        self
+        Ok(self)
     }
 
-    fn remove(&mut self, order: &Order) -> &mut Self {
-        let limit_price = order.limit_price().expect("");
+    fn remove(&mut self, order: &Order) -> Result<&mut Self, OrderbookError> {
+        let limit_price = order.limit_price().ok_or(OrderbookError::OrderToRemoveWithNoLimitPrice(*order))?;
         let Entry::Occupied(mut price_level) = self.0.entry(Reverse(limit_price)) else {
             unreachable!();
         };
@@ -71,31 +71,23 @@ impl Ladder for LadderWrapper<BTreeMap<Reverse<OrderPrice>, PriceLevel>> {
             }
         }
 
-        self
+        Ok(self)
     }
 }
 
 impl Ladder for LadderWrapper<BTreeMap<OrderPrice, PriceLevel>> {
-    fn insert(&mut self, order: &Order) -> &mut Self {
-        let limit_price = order
-            .limit_price()
-            .expect("a limit price is required to insert in the ladder");
+    fn insert(&mut self, order: &Order) -> Result<&mut Self, OrderbookError> {
+        let limit_price = order.limit_price().ok_or(OrderbookError::OrderToInsertWithNoLimitPrice(*order))?;
         let price_level = self.0.entry(limit_price).or_insert_with(|| PriceLevel::default());
 
         price_level.quantity += order.remaining();
         price_level.push_back(order.id());
 
-        let _ = order
-            .limit_price()
-            .expect("a limit price is required to insert in the ladder");
-
-        self
+        Ok(self)
     }
 
-    fn remove(&mut self, order: &Order) -> &mut Self {
-        let limit_price = order
-            .limit_price()
-            .expect("a limit price is required to remove in the ladder");
+    fn remove(&mut self, order: &Order) -> Result<&mut Self, OrderbookError> {
+        let limit_price = order.limit_price().ok_or(OrderbookError::OrderToRemoveWithNoLimitPrice(*order))?;
         let Entry::Occupied(mut price_level) = self.0.entry(limit_price) else {
             unreachable!();
         };
@@ -110,7 +102,7 @@ impl Ladder for LadderWrapper<BTreeMap<OrderPrice, PriceLevel>> {
             }
         }
 
-        self
+        Ok(self)
     }
 }
 
@@ -228,7 +220,7 @@ macro_rules! match_order {
 
         // insert limit order in the book
         if !$incoming_order.is_closed() && $incoming_order.is_bookable() {
-            $order_ladder.insert(&$incoming_order);
+            $order_ladder.insert(&$incoming_order)?;
             $orders.insert($incoming_order.id(), $incoming_order);
         }
     };
@@ -276,11 +268,10 @@ impl Orderbook {
 
                     for order_id in price_level.iter_mut() {
                         let limit_order = orders
-                            .get_mut(order_id)
-                            .expect("a limit order is expected in the price level");
+                            .get_mut(order_id).ok_or(OrderbookError::OrderToMatchNotFound(*order_id))?;
                         let traded = order.can_trade(limit_order);
 
-                        let trade = Trade::new(&mut order, limit_order, traded).expect("there should be a trade");
+                        let trade = Trade::new(&mut order, limit_order, traded).map_err(OrderbookError::TradeError)?;
                         new_trades.push(trade);
 
                         total_traded += traded;
@@ -307,7 +298,7 @@ impl Orderbook {
 
                 // insert limit order in the book
                 if !order.is_closed() && order.is_bookable() {
-                    order_ladder.insert(&order);
+                    order_ladder.insert(&order)?;
                     orders.insert(order.id(), order);
                 }
             }
@@ -322,20 +313,20 @@ impl Orderbook {
     }
 
     #[inline]
-    pub fn handle_cancel(&mut self, order_id: OrderId) -> Result<Order> {
+    pub fn handle_cancel(&mut self, order_id: OrderId) -> Result<Order, OrderbookError> {
         let order = self
             .orders
             .remove(&order_id)
-            .ok_or(OrderbookError::LimitOrderToCancelNotFound(order_id))?;
+            .ok_or(OrderbookError::OrderToCancelNotFound(order_id))?;
 
         match order.side() {
             OrderSide::Ask => {
                 let order_ladder = &mut self.asks;
-                order_ladder.remove(&order);
+                order_ladder.remove(&order)?;
             }
             OrderSide::Bid => {
                 let order_ladder = &mut self.bids;
-                order_ladder.remove(&order);
+                order_ladder.remove(&order)?;
             }
         }
 
@@ -345,8 +336,16 @@ impl Orderbook {
 
 #[derive(Debug, Error)]
 pub enum OrderbookError {
-    #[error("limit order to cancel not found: {0}")]
-    LimitOrderToCancelNotFound(OrderId),
+    #[error("order cannot be inserted into the book with no limit price! {0}")]
+    OrderToInsertWithNoLimitPrice(Order),
+    #[error("order cannot be removed from the book with no limit price! {0}")]
+    OrderToRemoveWithNoLimitPrice(Order),
+    #[error("order to cancel not found in the book! {0}")]
+    OrderToCancelNotFound(OrderId),
+    #[error("order to match not found in the book! {0}")]
+    OrderToMatchNotFound(OrderId),
+    #[error("trade error: {0}")]
+    TradeError(#[from] TradeError),
 }
 
 #[cfg(test)]
@@ -399,7 +398,7 @@ mod test {
         Order::limit_order(order_id, OrderSide::Bid, 020.into(), 016.into())
     }
 
-    mod limit_orders {
+    mod limit_orders_no_match {
         use super::*;
 
         #[rstest]
@@ -455,7 +454,8 @@ mod test {
                 ask_100_at_015.limit_price().unwrap() >
                 ask_070_at_014.limit_price().unwrap()
             );
-    
+
+            // after next 2 lines we should have 2 ask levels with the second at the top
             let _ = orderbook.handle_create(ask_100_at_015);
             let _ = orderbook.handle_create(ask_070_at_014);
     
@@ -467,6 +467,7 @@ mod test {
     
         #[rstest]
         fn test_handle_create_different_bid_price(mut orderbook: Orderbook, bid_099_at_015: Order, bid_020_at_016: Order) {
+            // after next 2 lines we should have 2 bid levels with the second at the top
             let _ = orderbook.handle_create(bid_099_at_015);
             let _ = orderbook.handle_create(bid_020_at_016);
     
@@ -474,6 +475,23 @@ mod test {
             assert_eq!(orderbook.peek_top(&OrderSide::Bid), Some(&bid_020_at_016));
             assert_eq!(orderbook.handle_cancel(bid_020_at_016.id()).ok(), Some(bid_020_at_016));
             assert_eq!(orderbook.peek_top(&OrderSide::Bid), Some(&bid_099_at_015));
+        }
+    }
+
+    mod limit_orders_match {
+        use super::*;
+
+        #[rstest]
+        fn test_handle_create_match_at_level(mut orderbook: Orderbook, ask_100_at_015: Order, bid_099_at_015: Order) {
+            // different side AND matching
+            assert_ne!(ask_100_at_015.side(), bid_099_at_015.side());
+            assert!(bid_099_at_015.matches(&ask_100_at_015));
+    
+            assert!(orderbook.handle_create(bid_099_at_015).is_ok());
+    
+            // the ask is completed and no bid is left
+            assert_eq!(orderbook.peek_top(&OrderSide::Ask), Some(&ask_100_at_015));
+            assert_eq!(orderbook.peek_top(&OrderSide::Bid), None);
         }
     }
 }
