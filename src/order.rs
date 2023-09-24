@@ -5,8 +5,6 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::trade::Trade;
-
 #[derive(Clone, Copy, Debug, Hash, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OrderId(u64);
 
@@ -20,6 +18,12 @@ impl OrderId {
 impl From<u64> for OrderId {
     fn from(value: u64) -> OrderId {
         OrderId::new(value)
+    }
+}
+
+impl Display for OrderId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "order_id:{}", self.0)
     }
 }
 
@@ -54,11 +58,8 @@ impl Display for OrderRequest {
                 limit_price,
                 quantity,
             } => match limit_price {
-                Some(limit_price) => write!(
-                    f,
-                    "[{side} LIMIT] order_id: {order_id}, limit_price: {limit_price}, quantity: {quantity}"
-                ),
-                None => write!(f, "[{side} MARKET] order_id: {order_id}, quantity: {quantity}"),
+                Some(limit_price) => write!(f, "ORDER[{order_id}] {side} {quantity}@{limit_price}"),
+                None => write!(f, "ORDER[{order_id}] {side} {quantity}@MARKET"),
             },
             OrderRequest::Cancel { order_id } => write!(f, "[CANCEL] order_id: {order_id}"),
         }
@@ -154,7 +155,7 @@ pub struct Order {
 
 impl Order {
     #[inline]
-    pub fn limit_order(id: OrderId, side: OrderSide, limit_price: OrderPrice, quantity: OrderQuantity) -> Self {
+    pub fn limit_order(id: OrderId, side: OrderSide, quantity: OrderQuantity, limit_price: OrderPrice) -> Self {
         Self {
             id,
             side,
@@ -210,6 +211,10 @@ impl Order {
         }
     }
 
+    pub fn can_trade(&self, order: &Order) -> OrderQuantity {
+        self.remaining().min(order.remaining())
+    }
+
     #[inline]
     pub fn is_bookable(&self) -> bool {
         match self.type_ {
@@ -227,14 +232,8 @@ impl Order {
     }
 
     #[inline]
-    pub fn trade(&mut self, other: &mut Self) -> Option<Trade> {
-        let (taker, maker) = (self, other);
-        Trade::new(taker, maker).ok()
-    }
-
-    #[inline]
     pub fn matches(&self, maker: &Self) -> bool {
-        let taker = self;
+        let taker = self; // note: at this point is assumed that maker is a limit order
 
         if taker.is_closed() || maker.is_closed() {
             return false;
@@ -250,6 +249,7 @@ impl Order {
         }
     }
 
+    #[inline]
     pub fn fill(&mut self, quantity: OrderQuantity) -> Result<(), OrderError> {
         if quantity > self.remaining() {
             return Err(OrderError::Overfill {
@@ -266,6 +266,15 @@ impl Order {
         };
 
         Ok(())
+    }
+
+    #[inline]
+    pub fn cancel(&mut self) {
+        match self.status() {
+            OrderStatus::Open => self.status = OrderStatus::Cancelled,
+            OrderStatus::Partial => self.status = OrderStatus::Closed,
+            _ => (),
+        }
     }
 }
 
@@ -290,7 +299,57 @@ impl PartialOrd for Order {
     }
 }
 
-#[derive(Debug, Error)]
+impl Display for Order {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let order_id = self.id;
+        let side = self.side;
+        let quantity = self.order_quantity;
+        match self.limit_price() {
+            Some(limit_price) => write!(f, "ORDER[{order_id}] {side} {quantity}@{limit_price}"),
+            None => write!(f, "ORDER[{order_id}] {side} {quantity}@MARKET"),
+        }
+    }
+}
+
+pub trait Flags {
+    fn is_all_or_none(&self) -> bool;
+
+    fn is_immediate_or_cancel(&self) -> bool;
+
+    fn is_post_only(&self) -> bool;
+}
+
+impl Flags for Order {
+    #[inline]
+    fn is_all_or_none(&self) -> bool {
+        match self.type_ {
+            OrderType::Market { all_or_none }
+            | OrderType::Limit {
+                time_in_force: TimeInForce::ImmediateOrCancel { all_or_none },
+                ..
+            } => all_or_none,
+            _ => false,
+        }
+    }
+
+    #[inline]
+    fn is_immediate_or_cancel(&self) -> bool {
+        matches!(
+            self.type_,
+            OrderType::Limit {
+                time_in_force: TimeInForce::ImmediateOrCancel { .. },
+                ..
+            } | OrderType::Market { .. }
+        )
+    }
+
+    #[inline]
+    fn is_post_only(&self) -> bool {
+        matches!(self.type_, OrderType::Limit { time_in_force: TimeInForce::GoodTilCancel { post_only }, .. } if post_only)
+    }
+}
+
+#[derive(Debug, Error, PartialEq)]
 pub enum OrderError {
     #[error("fill exceeds remaning amount (fill={}, remaining={})", .fill, .remaining)]
     Overfill {
@@ -339,5 +398,96 @@ pub mod util {
 
     pub fn random_decimal(rng: &mut ThreadRng) -> Decimal {
         Decimal::new(rng.gen_range(10000..1_000_000), 2)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use rstest::{fixture, rstest};
+
+    use super::*;
+
+    // convention for order ids: 3-digit side (bid = 900, ask = 901), 3-digit quantity, 3-digit price (for market orders always 999)
+
+    #[fixture]
+    fn ask_050_at_013() -> Order {
+        let order_id = OrderId::new(901_050_013);
+        Order::limit_order(order_id, OrderSide::Ask, 50.into(), 13.into())
+    }
+
+    #[fixture]
+    fn ask_070_at_014() -> Order {
+        let order_id = OrderId::new(901_070_014);
+        Order::limit_order(order_id, OrderSide::Ask, 70.into(), 14.into())
+    }
+
+    #[fixture]
+    fn bid_020_at_014() -> Order {
+        let order_id = OrderId::new(900_020_014);
+        Order::limit_order(order_id, OrderSide::Bid, 20.into(), 14.into())
+    }
+
+    #[fixture]
+    fn bid_040_at_013() -> Order {
+        let order_id = OrderId::new(900_040_013);
+        Order::limit_order(order_id, OrderSide::Bid, 40.into(), 13.into())
+    }
+
+    #[fixture]
+    fn bid_040_at_market() -> Order {
+        let order_id = OrderId::new(900_040_999);
+        Order::market_order(order_id, OrderSide::Bid, 40.into())
+    }
+
+    mod limit_orders {
+        use super::*;
+
+        fn assert_opposite_price(ask: &Order, bid: &Order, cmp: Ordering) {
+            assert_ne!(ask.side(), bid.side());
+            assert_eq!(ask.side(), OrderSide::Ask);
+            assert_eq!(bid.side(), OrderSide::Bid);
+
+            let ask_price = ask.limit_price().unwrap();
+            let bid_price = bid.limit_price().unwrap();
+
+            assert_eq!(ask_price.cmp(&bid_price), cmp);
+        }
+
+        #[rstest]
+        fn test_match_same_price(ask_070_at_014: Order, bid_020_at_014: Order) {
+            // first confirm prices are the same and then confirm orders are matching
+            assert_opposite_price(&ask_070_at_014, &bid_020_at_014, Ordering::Equal);
+            assert!(ask_070_at_014.matches(&bid_020_at_014));
+        }
+
+        #[rstest]
+        fn test_match_crossing_price(ask_050_at_013: Order, bid_020_at_014: Order) {
+            // first confirm prices are the same and then confirm orders are matching
+            assert_opposite_price(&ask_050_at_013, &bid_020_at_014, Ordering::Less);
+            assert!(ask_050_at_013.matches(&bid_020_at_014));
+        }
+
+        #[rstest]
+        fn test_no_match(ask_070_at_014: Order, bid_040_at_013: Order) {
+            // first confirm ask price is higher than bid price and then confirm orders are not matching
+            assert_opposite_price(&ask_070_at_014, &bid_040_at_013, Ordering::Greater);
+            assert!(!ask_070_at_014.matches(&bid_040_at_013));
+        }
+    }
+
+    mod market_orders {
+        use super::*;
+
+        #[rstest]
+        fn test_match(ask_070_at_014: Order, bid_040_at_market: Order) {
+            // the ask is the limit order, the bid is the market order
+            assert_ne!(ask_070_at_014.limit_price(), None);
+            assert_eq!(bid_040_at_market.limit_price(), None);
+
+            // if the market order is the taker then it should match
+            assert!(bid_040_at_market.matches(&ask_070_at_014));
+            // if the market order is the maker then it should not match (this should never happen)
+            assert!(!ask_070_at_014.matches(&bid_040_at_market));
+        }
     }
 }

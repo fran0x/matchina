@@ -24,6 +24,7 @@ tracing-subscriber = { version = "0.3.17", features = ["env-filter", "json", "pa
 
 [dev-dependencies]
 criterion = "0.5.1"
+rstest = "0.18.2"
 tap = "1.0.1"
 
 [[bin]]
