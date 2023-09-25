@@ -88,32 +88,75 @@ pub enum TradeError {
 #[cfg(test)]
 mod test {
     use crate::{
-        order::{Order, OrderId, OrderSide},
+        order::{Order, OrderId, OrderSide, OrderQuantity},
         trade::Trade,
     };
 
-    #[test]
-    fn test_match() {
-        // create two mock limit orders with matching prices
-        let taker_id: OrderId = 1.into();
-        let maker_id: OrderId = 2.into();
-        let mut taker = Order::limit_order(taker_id, OrderSide::Bid, 15.into(), 100.into());
-        let mut maker = Order::limit_order(maker_id, OrderSide::Ask, 10.into(), 100.into());
+    use rstest::{fixture, rstest};
 
-        // call Trade::new and expect it to succeed
-        let quantity = taker.can_trade(&maker);
-        let trade = Trade::new(&mut taker, &mut maker, quantity);
+    // convention for order ids: 3-digit side (bid = 900, ask = 901), 3-digit quantity, 3-digit price (for market orders always 999)
+
+    #[fixture]
+    fn ask_010_at_100() -> Order {
+        let order_id = OrderId::new(901_010_100);
+        Order::limit_order(order_id, OrderSide::Ask, 10.into(), 100.into())
+    }
+
+    #[fixture]
+    fn bid_015_at_100() -> Order {
+        let order_id = OrderId::new(900_015_100);
+        Order::limit_order(order_id, OrderSide::Bid, 15.into(), 100.into())
+    }
+
+    #[fixture]
+    fn bid_015_at_market() -> Order {
+        let order_id = OrderId::new(900_015_999);
+        Order::market_order(order_id, OrderSide::Bid, 15.into())
+    }
+
+    #[rstest]
+    fn match_limit_order(bid_015_at_100: Order, ask_010_at_100: Order) {
+        let mut taker = bid_015_at_100;
+        let mut maker = ask_010_at_100;
+
+        let traded = taker.remaining().min(maker.remaining());
+        assert_eq!(traded, taker.can_trade(&maker));
+
+        let trade = Trade::new(&mut taker, &mut maker, traded);
         assert!(trade.is_ok());
 
         // check that the orders have been filled correctly
         assert_eq!(taker.remaining(), 5.into());
-        assert_eq!(maker.remaining(), 0.into());
+        assert_eq!(maker.remaining(), OrderQuantity::ZERO);
 
         // check the details of the trade
         let trade = trade.unwrap();
-        assert_eq!(trade.taker, taker_id);
-        assert_eq!(trade.maker, maker_id);
-        assert_eq!(trade.quantity, 10.into());
-        assert_eq!(trade.price, 100.into());
+        assert_eq!(trade.taker, taker.id());
+        assert_eq!(trade.maker, maker.id());
+        assert_eq!(trade.quantity, traded);
+        assert_eq!(trade.price, maker.limit_price().unwrap());
+    }
+
+    #[rstest]
+    fn match_market_order(bid_015_at_market: Order, ask_010_at_100: Order) {
+        let mut taker = bid_015_at_market;
+        let mut maker = ask_010_at_100;
+
+        let traded = taker.remaining().min(maker.remaining());
+        assert_eq!(traded, taker.can_trade(&maker));
+
+        let trade = Trade::new(&mut taker, &mut maker, traded);
+        assert!(trade.is_ok());
+
+        // check that the orders have been filled correctly
+        assert_eq!(taker.remaining(), 5.into());
+        assert_eq!(maker.remaining(), OrderQuantity::ZERO);
+
+        // check the details of the trade
+        let trade = trade.unwrap();
+        assert_eq!(trade.taker, taker.id());
+        assert_eq!(trade.maker, maker.id());
+        assert_eq!(trade.quantity, traded);
+        assert_eq!(trade.price, maker.limit_price().unwrap());
     }
 }

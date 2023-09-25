@@ -373,11 +373,11 @@ mod test {
         Order::limit_order(order_id, OrderSide::Bid, 20.into(), 16.into())
     }
 
-    mod limit_orders_no_match {
+    mod limit_orders {
         use super::*;
 
         #[rstest]
-        fn test_handle_create(mut orderbook: Orderbook, ask_100_at_015: Order, bid_025_at_014: Order) {
+        fn insert_one_ask_one_ask_no_match(mut orderbook: Orderbook, ask_100_at_015: Order, bid_025_at_014: Order) {
             // different side not matching
             assert_ne!(ask_100_at_015.side(), bid_025_at_014.side());
             assert!(!bid_025_at_014.matches(&ask_100_at_015));
@@ -391,7 +391,7 @@ mod test {
         }
 
         #[rstest]
-        fn test_handle_cancel(mut orderbook: Orderbook, ask_100_at_015: Order, bid_025_at_014: Order) {
+        fn cancel_order(mut orderbook: Orderbook, ask_100_at_015: Order, bid_025_at_014: Order) {
             // different side not matching
             assert_ne!(ask_100_at_015.side(), bid_025_at_014.side());
             assert!(!bid_025_at_014.matches(&ask_100_at_015));
@@ -407,7 +407,7 @@ mod test {
         }
 
         #[rstest]
-        fn test_handle_create_duplicate_order(mut orderbook: Orderbook, ask_100_at_015: Order) {
+        fn cancel_duplicate_order(mut orderbook: Orderbook, ask_100_at_015: Order) {
             assert!(orderbook.handle_create(ask_100_at_015).is_ok());
             assert_eq!(
                 orderbook.handle_create(ask_100_at_015).unwrap_err(),
@@ -416,7 +416,7 @@ mod test {
         }
 
         #[rstest]
-        fn test_handle_create_same_level(mut orderbook: Orderbook, ask_100_at_015: Order, ask_080_at_015: Order) {
+        fn insert_two_asks_same_price(mut orderbook: Orderbook, ask_100_at_015: Order, ask_080_at_015: Order) {
             // same side same price
             assert_eq!(ask_100_at_015.side(), ask_080_at_015.side());
             assert_eq!(ask_100_at_015.limit_price(), ask_080_at_015.limit_price());
@@ -431,7 +431,7 @@ mod test {
         }
 
         #[rstest]
-        fn test_handle_create_different_ask_price(
+        fn insert_two_asks_different_price(
             mut orderbook: Orderbook,
             ask_100_at_015: Order,
             ask_070_at_014: Order,
@@ -451,7 +451,7 @@ mod test {
         }
 
         #[rstest]
-        fn test_handle_create_different_bid_price(
+        fn insert_two_bids_different_price(
             mut orderbook: Orderbook,
             bid_099_at_015: Order,
             bid_020_at_016: Order,
@@ -465,14 +465,9 @@ mod test {
             assert_eq!(orderbook.handle_cancel(bid_020_at_016.id()).ok(), Some(bid_020_at_016));
             assert_eq!(orderbook.peek_top(&OrderSide::Bid), Some(&bid_099_at_015));
         }
-    }
-
-    // TODO fix the logic that's breaking this test and add more tests but for market orders
-    mod limit_orders_match {
-        use super::*;
 
         #[rstest]
-        fn test_handle_create_match_at_level(mut orderbook: Orderbook, ask_100_at_015: Order, bid_099_at_015: Order) {
+        fn match_order_with_one_level(mut orderbook: Orderbook, ask_100_at_015: Order, bid_099_at_015: Order) {
             // different side AND matching
             assert_ne!(ask_100_at_015.side(), bid_099_at_015.side());
             assert!(bid_099_at_015.matches(&ask_100_at_015));
@@ -493,7 +488,7 @@ mod test {
         }
 
         #[rstest]
-        fn test_handle_create_match_two_orders(
+        fn match_order_with_two_levels(
             mut orderbook: Orderbook,
             ask_100_at_015: Order,
             bid_099_at_015: Order,

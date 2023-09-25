@@ -233,9 +233,9 @@ impl Order {
 
     #[inline]
     pub fn matches(&self, maker: &Self) -> bool {
-        let taker = self; // note: at this point is assumed that maker is a limit order
+        let taker = self;
 
-        if taker.is_closed() || maker.is_closed() {
+        if taker.is_closed() || maker.is_closed() || maker.limit_price().is_none() { // the last condition should never happen (...)
             return false;
         }
 
@@ -422,6 +422,12 @@ mod test {
     }
 
     #[fixture]
+    fn ask_070_at_market() -> Order {
+        let order_id = OrderId::new(901_070_999);
+        Order::market_order(order_id, OrderSide::Ask, 70.into())
+    }
+
+    #[fixture]
     fn bid_020_at_014() -> Order {
         let order_id = OrderId::new(900_020_014);
         Order::limit_order(order_id, OrderSide::Bid, 20.into(), 14.into())
@@ -442,7 +448,7 @@ mod test {
     mod limit_orders {
         use super::*;
 
-        fn assert_opposite_price(ask: &Order, bid: &Order, cmp: Ordering) {
+        fn assert_opposite_side(ask: &Order, bid: &Order, cmp: Ordering) {
             assert_ne!(ask.side(), bid.side());
             assert_eq!(ask.side(), OrderSide::Ask);
             assert_eq!(bid.side(), OrderSide::Bid);
@@ -454,23 +460,23 @@ mod test {
         }
 
         #[rstest]
-        fn test_match_same_price(ask_070_at_014: Order, bid_020_at_014: Order) {
+        fn match_same_price(ask_070_at_014: Order, bid_020_at_014: Order) {
             // first confirm prices are the same and then confirm orders are matching
-            assert_opposite_price(&ask_070_at_014, &bid_020_at_014, Ordering::Equal);
+            assert_opposite_side(&ask_070_at_014, &bid_020_at_014, Ordering::Equal);
             assert!(ask_070_at_014.matches(&bid_020_at_014));
         }
 
         #[rstest]
-        fn test_match_crossing_price(ask_050_at_013: Order, bid_020_at_014: Order) {
+        fn match_crossing_price(ask_050_at_013: Order, bid_020_at_014: Order) {
             // first confirm prices are the same and then confirm orders are matching
-            assert_opposite_price(&ask_050_at_013, &bid_020_at_014, Ordering::Less);
+            assert_opposite_side(&ask_050_at_013, &bid_020_at_014, Ordering::Less);
             assert!(ask_050_at_013.matches(&bid_020_at_014));
         }
 
         #[rstest]
-        fn test_no_match(ask_070_at_014: Order, bid_040_at_013: Order) {
+        fn no_match(ask_070_at_014: Order, bid_040_at_013: Order) {
             // first confirm ask price is higher than bid price and then confirm orders are not matching
-            assert_opposite_price(&ask_070_at_014, &bid_040_at_013, Ordering::Greater);
+            assert_opposite_side(&ask_070_at_014, &bid_040_at_013, Ordering::Greater);
             assert!(!ask_070_at_014.matches(&bid_040_at_013));
         }
     }
@@ -479,7 +485,7 @@ mod test {
         use super::*;
 
         #[rstest]
-        fn test_match(ask_070_at_014: Order, bid_040_at_market: Order) {
+        fn match_bid(ask_070_at_014: Order, bid_040_at_market: Order) {
             // the ask is the limit order, the bid is the market order
             assert_ne!(ask_070_at_014.limit_price(), None);
             assert_eq!(bid_040_at_market.limit_price(), None);
@@ -488,6 +494,18 @@ mod test {
             assert!(bid_040_at_market.matches(&ask_070_at_014));
             // if the market order is the maker then it should not match (this should never happen)
             assert!(!ask_070_at_014.matches(&bid_040_at_market));
+        }
+
+        #[rstest]
+        fn match_ask(ask_070_at_market: Order, bid_040_at_013: Order) {
+            // the bid is the limit order, the ask is the market order
+            assert_ne!(bid_040_at_013.limit_price(), None);
+            assert_eq!(ask_070_at_market.limit_price(), None);
+
+            // if the market order is the taker then it should match
+            assert!(ask_070_at_market.matches(&bid_040_at_013));
+            // if the market order is the maker then it should not match (this should never happen)
+            assert!(!bid_040_at_013.matches(&ask_070_at_market));
         }
     }
 }
