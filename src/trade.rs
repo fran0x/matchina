@@ -88,7 +88,7 @@ pub enum TradeError {
 #[cfg(test)]
 mod test {
     use crate::{
-        order::{Order, OrderId, OrderSide, OrderQuantity},
+        order::{Order, OrderId, OrderQuantity, OrderSide},
         trade::Trade,
     };
 

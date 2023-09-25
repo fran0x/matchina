@@ -235,7 +235,8 @@ impl Order {
     pub fn matches(&self, maker: &Self) -> bool {
         let taker = self;
 
-        if taker.is_closed() || maker.is_closed() || maker.limit_price().is_none() { // the last condition should never happen (...)
+        if taker.is_closed() || maker.is_closed() || maker.limit_price().is_none() {
+            // the last condition should never happen (...)
             return false;
         }
 

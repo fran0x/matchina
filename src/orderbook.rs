@@ -431,11 +431,7 @@ mod test {
         }
 
         #[rstest]
-        fn insert_two_asks_different_price(
-            mut orderbook: Orderbook,
-            ask_100_at_015: Order,
-            ask_070_at_014: Order,
-        ) {
+        fn insert_two_asks_different_price(mut orderbook: Orderbook, ask_100_at_015: Order, ask_070_at_014: Order) {
             // same side different price (second order is a better ask)
             assert_eq!(ask_100_at_015.side(), ask_070_at_014.side());
             assert!(ask_100_at_015.limit_price().unwrap() > ask_070_at_014.limit_price().unwrap());
@@ -451,11 +447,7 @@ mod test {
         }
 
         #[rstest]
-        fn insert_two_bids_different_price(
-            mut orderbook: Orderbook,
-            bid_099_at_015: Order,
-            bid_020_at_016: Order,
-        ) {
+        fn insert_two_bids_different_price(mut orderbook: Orderbook, bid_099_at_015: Order, bid_020_at_016: Order) {
             // after next 2 lines we should have 2 bid levels with the second at the top
             let _ = orderbook.handle_create(bid_099_at_015);
             let _ = orderbook.handle_create(bid_020_at_016);
