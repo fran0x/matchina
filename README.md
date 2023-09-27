@@ -9,10 +9,12 @@ A simple matching engine for a crypto exchange.
 
 ### TODO
 
-- [ ] enforce IOC, FOK, PostOnly policies
-- [ ] generate unique trade IDs
+- [x] enforce IOC, FOK, PostOnly policies
+- [x] generate unique trade IDs
 - [ ] handle multiple accounts (asset balance, self matching prevention...) - internal vs external (current) order ID
 - [ ] support multiple pairs (with load balancer...)
+- [ ] performance: flamegraph, perf, ...
+- [ ] try different structures: critbit, qp-trie, ...
 
 Future components:
 

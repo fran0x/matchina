@@ -12,7 +12,7 @@ use rust_decimal::Decimal;
 use thiserror::Error;
 
 use crate::{
-    order::{Order, OrderId, OrderPrice, OrderQuantity, OrderSide},
+    order::{Order, OrderFeatures, OrderId, OrderPrice, OrderQuantity, OrderSide},
     trade::{Trade, TradeError, TradeId},
 };
 
@@ -38,6 +38,15 @@ impl<T> Deref for LadderWrapper<T> {
 impl<T> DerefMut for LadderWrapper<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+impl<K: Ord> LadderWrapper<BTreeMap<K, PriceLevel>> {
+    fn peek_top<'a>(&'a self, orders: &'a IndexMap<OrderId, Order>) -> Option<&'a Order> {
+        self.first_key_value()
+            .map(|(_, level)| level)?
+            .front()
+            .and_then(|order_id| orders.get(order_id))
     }
 }
 
@@ -189,6 +198,16 @@ impl Display for PriceLevel {
 
 macro_rules! match_order {
     ($incoming_order:ident, $orders:ident, $trades:ident, $order_ladder:ident, $opposite_ladder:ident) => {
+        // PostOnly orders should go directly to the book or canceled in case can be matched
+        if $incoming_order.is_post_only()
+            && !$opposite_ladder
+                .peek_top($orders)
+                .is_some_and(|top_order| $incoming_order.matches(top_order))
+        {
+            $incoming_order.cancel();
+            return Ok(());
+        }
+
         let mut trades: Vec<Trade> = vec![];
         let mut drained_levels = 0;
 
@@ -233,6 +252,12 @@ macro_rules! match_order {
             $trades.insert(trade.id(), trade);
         }
 
+        // IOC orders should be closed at the end of the matching phase (this is, no insertion in the book)
+        if $incoming_order.is_immediate_or_cancel() {
+            $incoming_order.cancel();
+            return Ok(());
+        }
+
         // insert limit order in the book
         if !$incoming_order.is_closed() && $incoming_order.is_bookable() {
             $order_ladder.insert(&$incoming_order)?;
@@ -253,11 +278,9 @@ impl Orderbook {
     #[inline]
     pub fn peek_top(&self, side: &OrderSide) -> Option<&Order> {
         match side {
-            OrderSide::Ask => self.asks.first_key_value().map(|(_, level)| level)?,
-            OrderSide::Bid => self.bids.first_key_value().map(|(_, level)| level)?,
+            OrderSide::Ask => self.asks.peek_top(&self.orders),
+            OrderSide::Bid => self.bids.peek_top(&self.orders),
         }
-        .front()
-        .and_then(|order_id| self.orders.get(order_id))
     }
 
     #[inline]

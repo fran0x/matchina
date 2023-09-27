@@ -312,7 +312,7 @@ impl Display for Order {
     }
 }
 
-pub trait Flags {
+pub trait OrderFeatures {
     fn is_all_or_none(&self) -> bool;
 
     fn is_immediate_or_cancel(&self) -> bool;
@@ -320,20 +320,28 @@ pub trait Flags {
     fn is_post_only(&self) -> bool;
 }
 
-impl Flags for Order {
-    #[inline]
+impl OrderFeatures for Order {
     fn is_all_or_none(&self) -> bool {
-        match self.type_ {
-            OrderType::Market { all_or_none }
-            | OrderType::Limit {
-                time_in_force: TimeInForce::ImmediateOrCancel { all_or_none },
-                ..
-            } => all_or_none,
-            _ => false,
-        }
+        matches!(
+            self.type_,
+            OrderType::Market { all_or_none: true }
+                | OrderType::Limit {
+                    time_in_force: TimeInForce::ImmediateOrCancel { all_or_none: true },
+                    ..
+                }
+        )
     }
 
-    #[inline]
+    fn is_post_only(&self) -> bool {
+        matches!(
+            self.type_,
+            OrderType::Limit {
+                time_in_force: TimeInForce::GoodTilCancel { post_only: true },
+                ..
+            }
+        )
+    }
+
     fn is_immediate_or_cancel(&self) -> bool {
         matches!(
             self.type_,
@@ -342,11 +350,6 @@ impl Flags for Order {
                 ..
             } | OrderType::Market { .. }
         )
-    }
-
-    #[inline]
-    fn is_post_only(&self) -> bool {
-        matches!(self.type_, OrderType::Limit { time_in_force: TimeInForce::GoodTilCancel { post_only }, .. } if post_only)
     }
 }
 
