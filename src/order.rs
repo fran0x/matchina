@@ -512,4 +512,15 @@ mod test {
             assert!(!bid_040_at_013.matches(&ask_070_at_market));
         }
     }
+
+    mod features {
+        use super::*;
+
+        #[rstest]
+        fn is_immediate_or_cancel(ask_070_at_market: Order, bid_040_at_013: Order) {
+            // market orders are IOC
+            assert_eq!(ask_070_at_market.type_, OrderType::Market { all_or_none: false });
+            assert!(ask_070_at_market.is_immediate_or_cancel());
+        }
+    }
 }

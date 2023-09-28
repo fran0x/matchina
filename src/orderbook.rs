@@ -198,7 +198,7 @@ impl Display for PriceLevel {
 
 macro_rules! match_order {
     ($incoming_order:ident, $orders:ident, $trades:ident, $order_ladder:ident, $opposite_ladder:ident) => {
-        // PostOnly orders should go directly to the book or canceled in case can be matched
+        // PostOnly orders should go directly to the book; otherwise, if they can be matched inmediately, then they should be canceled
         if $incoming_order.is_post_only()
             && !$opposite_ladder
                 .peek_top($orders)
@@ -529,6 +529,19 @@ mod test {
                 None => panic!(),
             }
             assert_eq!(orderbook.peek_top(&OrderSide::Ask), None);
+        }
+    }
+
+    mod features {
+        use super::*;
+
+        #[rstest]
+        fn cancel_post_only_matched(
+            mut orderbook: Orderbook,
+            ask_100_at_015: Order,
+            bid_099_at_015: Order,
+            bid_020_at_016: Order,
+        ) {
         }
     }
 }
