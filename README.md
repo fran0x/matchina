@@ -29,12 +29,10 @@ just
 
 ## Contributing
 
-Contributions from the community as welcomed! Feel free to submit bug reports, feature requests, or even pull requests to enhance the matching engine.
+Contributions from the community are welcomed!
+Feel free to submit bug reports, feature requests, or even pull requests to enhance the matching engine.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License.
 
----
-
-Feel free to customize and expand upon this README based on your project's specific details and requirements.
