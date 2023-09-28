@@ -324,11 +324,10 @@ impl OrderFeatures for Order {
     fn is_all_or_none(&self) -> bool {
         matches!(
             self.type_,
-            OrderType::Market { all_or_none: true }
-                | OrderType::Limit {
-                    time_in_force: TimeInForce::ImmediateOrCancel { all_or_none: true },
-                    ..
-                }
+            OrderType::Limit {
+                time_in_force: TimeInForce::ImmediateOrCancel { all_or_none: true },
+                ..
+            } | OrderType::Market { all_or_none: true }
         )
     }
 
@@ -517,10 +516,77 @@ mod test {
         use super::*;
 
         #[rstest]
+        fn check_defaults() {
+            // the default time in force is GTC
+            let gtc = TimeInForce::GoodTilCancel { post_only: false };
+            assert_eq!(TimeInForce::default(), gtc);
+        }
+
+        #[rstest]
+        fn is_all_or_none(ask_070_at_market: Order, bid_040_at_013: Order) {
+            // this market order is not FOK by default, first confirm that then mutate to make it FOK
+            let mut market_order = ask_070_at_market;
+            assert!(!market_order.is_all_or_none());
+
+            let fok = OrderType::Market { all_or_none: true };
+            market_order.type_ = fok;
+            assert!(market_order.is_all_or_none());
+
+            // this limit order is not FOK by default, first confirm that then mutate to make it FOK
+            let mut limit_order = bid_040_at_013;
+            assert!(!limit_order.is_all_or_none());
+
+            let fok = TimeInForce::ImmediateOrCancel { all_or_none: true };
+            limit_order.type_ = OrderType::Limit {
+                limit_price: Decimal::ZERO,
+                time_in_force: fok,
+            };
+            assert!(limit_order.is_all_or_none());
+        }
+
+        #[rstest]
+        fn is_post_only(ask_070_at_market: Order, bid_040_at_013: Order) {
+            // market orders cannot be GTC
+            assert_eq!(ask_070_at_market.type_, OrderType::Market { all_or_none: false });
+            assert!(!ask_070_at_market.is_post_only());
+
+            // this limit order is not GTC by default, first confirm that then mutate to make it GTC
+            let mut limit_order = bid_040_at_013;
+            assert!(!limit_order.is_post_only());
+
+            // change the limit order to GTC but without enforcing post_only
+            let gtc = TimeInForce::GoodTilCancel { post_only: false };
+            limit_order.type_ = OrderType::Limit {
+                limit_price: Decimal::ZERO,
+                time_in_force: gtc,
+            };
+            assert!(!limit_order.is_post_only());
+
+            // change the limit order to GTC but enforcing post_only
+            let gtc = TimeInForce::GoodTilCancel { post_only: true };
+            limit_order.type_ = OrderType::Limit {
+                limit_price: Decimal::ZERO,
+                time_in_force: gtc,
+            };
+            assert!(limit_order.is_post_only());
+        }
+
+        #[rstest]
         fn is_immediate_or_cancel(ask_070_at_market: Order, bid_040_at_013: Order) {
             // market orders are IOC
             assert_eq!(ask_070_at_market.type_, OrderType::Market { all_or_none: false });
             assert!(ask_070_at_market.is_immediate_or_cancel());
+
+            // this limit order is not IOC by default, first confirm that then mutate to make it IOC
+            let mut limit_order = bid_040_at_013;
+            assert!(!limit_order.is_immediate_or_cancel());
+
+            let ioc = TimeInForce::ImmediateOrCancel { all_or_none: false };
+            limit_order.type_ = OrderType::Limit {
+                limit_price: Decimal::ZERO,
+                time_in_force: ioc,
+            };
+            assert!(limit_order.is_immediate_or_cancel());
         }
     }
 }

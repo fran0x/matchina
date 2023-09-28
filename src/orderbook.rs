@@ -531,17 +531,4 @@ mod test {
             assert_eq!(orderbook.peek_top(&OrderSide::Ask), None);
         }
     }
-
-    mod features {
-        use super::*;
-
-        #[rstest]
-        fn cancel_post_only_matched(
-            mut orderbook: Orderbook,
-            ask_100_at_015: Order,
-            bid_099_at_015: Order,
-            bid_020_at_016: Order,
-        ) {
-        }
-    }
 }
