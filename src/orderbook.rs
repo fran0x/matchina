@@ -531,4 +531,62 @@ mod test {
             assert_eq!(orderbook.peek_top(&OrderSide::Ask), None);
         }
     }
+
+    mod features {
+        use crate::order::{OrderType, TimeInForce};
+
+        use super::*;
+
+        #[rstest]
+        fn cancel_post_only(mut orderbook: Orderbook, ask_100_at_015: Order, bid_099_at_015: Order) {
+            // keep the original limit price
+            let limit_price = bid_099_at_015.limit_price().unwrap();
+
+            // mutate incoming order to make it post only
+            let mut bid_099_at_015 = bid_099_at_015;
+            bid_099_at_015.mutate_type(OrderType::Limit {
+                limit_price,
+                time_in_force: TimeInForce::GoodTilCancel { post_only: true },
+            });
+
+            // confirm is post only, it matches and is not closed
+            assert!(bid_099_at_015.is_post_only());
+            assert!(bid_099_at_015.matches(&ask_100_at_015));
+            assert!(!bid_099_at_015.is_closed());
+
+            // send to the book, there should be no matching
+            assert!(orderbook.handle_create(ask_100_at_015).is_ok());
+            assert!(orderbook.handle_create(bid_099_at_015).is_ok());
+
+            // ask remains untouched in the top and there's no bid in the book
+            assert_eq!(orderbook.peek_top(&OrderSide::Ask), Some(&ask_100_at_015));
+            assert_eq!(orderbook.peek_top(&OrderSide::Bid), None);
+        }
+
+        #[rstest]
+        fn cancel_immediate_or_cancel(mut orderbook: Orderbook, ask_080_at_015: Order, bid_099_at_015: Order) {
+            // keep the original limit price
+            let limit_price = bid_099_at_015.limit_price().unwrap();
+
+            // mutate incoming order to make it immediate or cancel
+            let mut bid_099_at_015 = bid_099_at_015;
+            bid_099_at_015.mutate_type(OrderType::Limit {
+                limit_price,
+                time_in_force: TimeInForce::ImmediateOrCancel { all_or_none: false },
+            });
+
+            // confirm is immediate or cancel, it matches and is not closed
+            assert!(bid_099_at_015.is_immediate_or_cancel());
+            assert!(bid_099_at_015.matches(&ask_080_at_015));
+            assert!(!bid_099_at_015.is_closed());
+
+            // send to the book, there should be no matching
+            assert!(orderbook.handle_create(ask_080_at_015).is_ok());
+            assert!(orderbook.handle_create(bid_099_at_015).is_ok());
+
+            // the ask is filled and the remaining bid doesn't remain in the book
+            assert_eq!(orderbook.peek_top(&OrderSide::Ask), None);
+            assert_eq!(orderbook.peek_top(&OrderSide::Bid), None);
+        }
+    }
 }

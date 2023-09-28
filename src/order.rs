@@ -277,6 +277,12 @@ impl Order {
             _ => (),
         }
     }
+
+    // allow this mutation but only for unit tests
+    #[cfg(test)]
+    pub fn mutate_type(&mut self, order_type: OrderType) {
+        self.type_ = order_type;
+    }
 }
 
 impl PartialEq for Order {
