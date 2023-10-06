@@ -129,6 +129,7 @@ impl Ladder for LadderWrapper<BTreeMap<Reverse<OrderPrice>, PriceLevel>> {
 type AsksLadder = LadderWrapper<BTreeMap<OrderPrice, PriceLevel>>;
 type BidsLadder = LadderWrapper<BTreeMap<Reverse<OrderPrice>, PriceLevel>>;
 
+#[derive(Debug)]
 pub struct PriceLevel {
     order_ids: VecDeque<OrderId>,
     quantity: OrderQuantity,
@@ -197,17 +198,39 @@ impl Display for PriceLevel {
 }
 
 macro_rules! match_order {
-    ($incoming_order:ident, $orders:ident, $trades:ident, $order_ladder:ident, $opposite_ladder:ident) => {
+    ($incoming_order:ident, $orders:ident, $trades:ident, $order_ladder:ident, $opposite_ladder:ident) =>  {
+        'exit: {
         // PostOnly orders should go directly to the book; otherwise, if they can be matched inmediately, then they should be canceled
         if $incoming_order.is_post_only()
-            && !$opposite_ladder
+            && $opposite_ladder
                 .peek_top($orders)
                 .is_some_and(|top_order| $incoming_order.matches(top_order))
         {
             $incoming_order.cancel();
-            return Ok(());
+            break 'exit Ok(false);
         }
 
+        // FOK orders should be canceled if they cannot be fill completely
+        if $incoming_order.is_fill_or_kill() {
+            let mut can_be_filled = false;
+            let mut remaining = $incoming_order.remaining();
+                for (_, price_level) in $opposite_ladder.iter_mut() {
+                if $incoming_order.is_closed() || !price_level.matches(& $incoming_order) {
+                    break;
+                }
+                remaining -= price_level.quantity;
+                if (remaining <= Decimal::ZERO) {
+                    can_be_filled = true;
+                    break;
+                }
+            }
+            if !can_be_filled {
+                $incoming_order.cancel();
+                break 'exit Ok(false);
+            }
+        }
+
+        let mut matched = false;
         let mut trades: Vec<Trade> = vec![];
         let mut drained_levels = 0;
 
@@ -228,6 +251,8 @@ macro_rules! match_order {
                 let trade = Trade::new(&mut $incoming_order, maker, traded).map_err(OrderbookError::TradeError)?;
                 trades.push(trade);
 
+                matched = true;
+
                 total_traded += traded;
                 if maker.is_closed() {
                     orders_completed += 1;
@@ -236,7 +261,7 @@ macro_rules! match_order {
 
             price_level.quantity -= total_traded;
             for _ in 0..orders_completed {
-                price_level.pop_front();
+                price_level.pop_front().and_then(|order_id| $orders.remove(& order_id));
             }
 
             if price_level.quantity == OrderQuantity::ZERO {
@@ -247,7 +272,7 @@ macro_rules! match_order {
             $opposite_ladder.pop_first();
         }
 
-        // record trades
+        // save trades
         for trade in trades {
             $trades.insert(trade.id(), trade);
         }
@@ -255,7 +280,7 @@ macro_rules! match_order {
         // IOC orders should be closed at the end of the matching phase (this is, no insertion in the book)
         if $incoming_order.is_immediate_or_cancel() {
             $incoming_order.cancel();
-            return Ok(());
+            break 'exit Ok(matched);
         }
 
         // insert limit order in the book
@@ -263,7 +288,9 @@ macro_rules! match_order {
             $order_ladder.insert(&$incoming_order)?;
             $orders.insert($incoming_order.id(), $incoming_order);
         }
-    };
+
+        Ok(matched)
+    }};
 }
 
 #[derive(Default)]
@@ -273,6 +300,14 @@ pub struct Orderbook {
     orders: IndexMap<OrderId, Order>,
     trades: IndexMap<TradeId, Trade>,
 }
+
+type MatchResult = Result<bool, OrderbookError>;
+#[cfg(test)]
+const MATCHED: MatchResult = Ok(true);
+#[cfg(test)]
+const NOT_MATCHED: MatchResult = Ok(false);
+
+type CancelResult = Result<Order, OrderbookError>;
 
 impl Orderbook {
     #[inline]
@@ -284,7 +319,7 @@ impl Orderbook {
     }
 
     #[inline]
-    pub fn handle_create(&mut self, mut order: Order) -> Result<(), OrderbookError> {
+    pub fn handle_create(&mut self, mut order: Order) -> MatchResult {
         if self.orders.contains_key(&order.id()) {
             return Err(OrderbookError::OrderDuplicated(order.id()));
         }
@@ -296,20 +331,18 @@ impl Orderbook {
             OrderSide::Ask => {
                 let order_ladder = &mut self.asks;
                 let opposite_ladder = &mut self.bids;
-                match_order!(order, orders, trades, order_ladder, opposite_ladder);
+                match_order!(order, orders, trades, order_ladder, opposite_ladder)
             }
             OrderSide::Bid => {
                 let order_ladder = &mut self.bids;
                 let opposite_ladder = &mut self.asks;
-                match_order!(order, orders, trades, order_ladder, opposite_ladder);
+                match_order!(order, orders, trades, order_ladder, opposite_ladder)
             }
-        };
-
-        Ok(())
+        }
     }
 
     #[inline]
-    pub fn handle_cancel(&mut self, order_id: OrderId) -> Result<Order, OrderbookError> {
+    pub fn handle_cancel(&mut self, order_id: OrderId) -> CancelResult {
         let order = self
             .orders
             .remove(&order_id)
@@ -405,8 +438,8 @@ mod test {
             assert_ne!(ask_100_at_015.side(), bid_025_at_014.side());
             assert!(!bid_025_at_014.matches(&ask_100_at_015));
 
-            assert!(orderbook.handle_create(ask_100_at_015).is_ok());
-            assert!(orderbook.handle_create(bid_025_at_014).is_ok());
+            assert_eq!(orderbook.handle_create(ask_100_at_015), NOT_MATCHED);
+            assert_eq!(orderbook.handle_create(bid_025_at_014), NOT_MATCHED);
 
             // confirm the top for bid and the top for ask are the ones inserted
             assert_eq!(orderbook.peek_top(&OrderSide::Ask), Some(&ask_100_at_015));
@@ -419,22 +452,48 @@ mod test {
             assert_ne!(ask_100_at_015.side(), bid_025_at_014.side());
             assert!(!bid_025_at_014.matches(&ask_100_at_015));
 
-            let _ = orderbook.handle_create(ask_100_at_015);
-            let _ = orderbook.handle_create(bid_025_at_014);
+            assert_eq!(orderbook.handle_create(ask_100_at_015), NOT_MATCHED);
+            assert_eq!(orderbook.handle_create(bid_025_at_014), NOT_MATCHED);
 
             // cancel the ask then confirm the top ask is empty and the top bid remains, finally try to cancel the same again
             assert_eq!(orderbook.handle_cancel(ask_100_at_015.id()).ok(), Some(ask_100_at_015));
             assert_eq!(orderbook.peek_top(&OrderSide::Ask), None);
             assert_eq!(orderbook.peek_top(&OrderSide::Bid), Some(&bid_025_at_014));
-            assert_eq!(orderbook.handle_cancel(ask_100_at_015.id()).ok(), None);
+            assert_eq!(
+                orderbook.handle_cancel(ask_100_at_015.id()),
+                Err(OrderbookError::OrderToCancelNotFound(ask_100_at_015.id()))
+            );
         }
 
         #[rstest]
-        fn cancel_duplicate_order(mut orderbook: Orderbook, ask_100_at_015: Order) {
-            assert!(orderbook.handle_create(ask_100_at_015).is_ok());
+        fn cancel_duplicated_order(mut orderbook: Orderbook, ask_100_at_015: Order) {
+            assert_eq!(orderbook.handle_create(ask_100_at_015), NOT_MATCHED);
             assert_eq!(
-                orderbook.handle_create(ask_100_at_015).unwrap_err(),
-                OrderbookError::OrderDuplicated(ask_100_at_015.id())
+                orderbook.handle_create(ask_100_at_015),
+                Err(OrderbookError::OrderDuplicated(ask_100_at_015.id()))
+            );
+        }
+
+        #[rstest]
+        fn cancel_matched_order(mut orderbook: Orderbook, ask_100_at_015: Order, bid_099_at_015: Order) {
+            // different side AND matching
+            assert_ne!(ask_100_at_015.side(), bid_099_at_015.side());
+            assert!(bid_099_at_015.matches(&ask_100_at_015));
+
+            assert_eq!(orderbook.handle_create(bid_099_at_015), NOT_MATCHED);
+            assert_eq!(orderbook.handle_create(ask_100_at_015), MATCHED);
+
+            // the bid in the limit book is gone because the incoming ask matched and completed the bid
+            assert!(orderbook.peek_top(&OrderSide::Bid).is_none());
+            assert!(orderbook.peek_top(&OrderSide::Ask).is_some());
+
+            // there's a leftover ask hence the ask can be canceled
+            assert_eq!(orderbook.handle_cancel(ask_100_at_015.id()).ok(), Some(ask_100_at_015));
+
+            // the bid should be gone hence cannot be canceled!
+            assert_eq!(
+                orderbook.handle_cancel(bid_099_at_015.id()),
+                Err(OrderbookError::OrderToCancelNotFound(bid_099_at_015.id()))
             );
         }
 
@@ -444,8 +503,8 @@ mod test {
             assert_eq!(ask_100_at_015.side(), ask_080_at_015.side());
             assert_eq!(ask_100_at_015.limit_price(), ask_080_at_015.limit_price());
 
-            let _ = orderbook.handle_create(ask_100_at_015);
-            let _ = orderbook.handle_create(ask_080_at_015);
+            assert_eq!(orderbook.handle_create(ask_100_at_015), NOT_MATCHED);
+            assert_eq!(orderbook.handle_create(ask_080_at_015), NOT_MATCHED);
 
             // confirm the first ask is the one returned as top then cancel that one and confirm the other becomes the new top
             assert_eq!(orderbook.peek_top(&OrderSide::Ask), Some(&ask_100_at_015));
@@ -460,8 +519,8 @@ mod test {
             assert!(ask_100_at_015.limit_price().unwrap() > ask_070_at_014.limit_price().unwrap());
 
             // after next 2 lines we should have 2 ask levels with the second at the top
-            let _ = orderbook.handle_create(ask_100_at_015);
-            let _ = orderbook.handle_create(ask_070_at_014);
+            assert_eq!(orderbook.handle_create(ask_100_at_015), NOT_MATCHED);
+            assert_eq!(orderbook.handle_create(ask_070_at_014), NOT_MATCHED);
 
             // confirm the second ask is the one returned as top then cancel that one and confirm the other becomes the new top
             assert_eq!(orderbook.peek_top(&OrderSide::Ask), Some(&ask_070_at_014));
@@ -472,8 +531,8 @@ mod test {
         #[rstest]
         fn insert_two_bids_different_price(mut orderbook: Orderbook, bid_099_at_015: Order, bid_020_at_016: Order) {
             // after next 2 lines we should have 2 bid levels with the second at the top
-            let _ = orderbook.handle_create(bid_099_at_015);
-            let _ = orderbook.handle_create(bid_020_at_016);
+            assert_eq!(orderbook.handle_create(bid_099_at_015), NOT_MATCHED);
+            assert_eq!(orderbook.handle_create(bid_020_at_016), NOT_MATCHED);
 
             // confirm the second bid is the one returned as top then cancel that one and confirm the other becomes the new top
             assert_eq!(orderbook.peek_top(&OrderSide::Bid), Some(&bid_020_at_016));
@@ -488,8 +547,8 @@ mod test {
             assert!(bid_099_at_015.matches(&ask_100_at_015));
 
             let expected = ask_100_at_015.remaining() - bid_099_at_015.remaining();
-            assert!(orderbook.handle_create(bid_099_at_015).is_ok());
-            assert!(orderbook.handle_create(ask_100_at_015).is_ok());
+            assert_eq!(orderbook.handle_create(bid_099_at_015), NOT_MATCHED);
+            assert_eq!(orderbook.handle_create(ask_100_at_015), MATCHED);
 
             // the ask is still open but the bid is gone
             match orderbook.peek_top(&OrderSide::Ask) {
@@ -516,9 +575,9 @@ mod test {
             assert!(bid_020_at_016.matches(&ask_100_at_015));
 
             let expected = bid_099_at_015.remaining() - (ask_100_at_015.remaining() - bid_020_at_016.remaining());
-            assert!(orderbook.handle_create(bid_099_at_015).is_ok());
-            assert!(orderbook.handle_create(bid_020_at_016).is_ok());
-            assert!(orderbook.handle_create(ask_100_at_015).is_ok());
+            assert_eq!(orderbook.handle_create(bid_099_at_015), NOT_MATCHED);
+            assert_eq!(orderbook.handle_create(bid_020_at_016), NOT_MATCHED);
+            assert_eq!(orderbook.handle_create(ask_100_at_015), MATCHED);
 
             // the ask is gone and in the bid one is remaining
             match orderbook.peek_top(&OrderSide::Bid) {
@@ -538,6 +597,55 @@ mod test {
         use super::*;
 
         #[rstest]
+        fn cancel_fill_or_kill(
+            mut orderbook: Orderbook,
+            ask_080_at_015: Order,
+            ask_100_at_015: Order,
+            bid_099_at_015: Order,
+        ) {
+            // keep the original limit price
+            let limit_price = bid_099_at_015.limit_price().unwrap();
+
+            // mutate incoming order to make it post only
+            let mut bid_099_at_015 = bid_099_at_015;
+            bid_099_at_015.mutate_type(OrderType::Limit {
+                limit_price,
+                time_in_force: TimeInForce::ImmediateOrCancel { fill_or_kill: true },
+            });
+
+            // confirm is FOK, it matches and is not closed
+            assert!(bid_099_at_015.is_fill_or_kill());
+            assert!(bid_099_at_015.matches(&ask_080_at_015));
+            assert!(!bid_099_at_015.is_closed());
+
+            // confirm it cannot be filled
+            assert!(bid_099_at_015.remaining() > ask_080_at_015.remaining());
+
+            // send to the book, there should be no matching
+            assert_eq!(orderbook.handle_create(ask_080_at_015), NOT_MATCHED);
+            assert_eq!(orderbook.handle_create(bid_099_at_015), NOT_MATCHED);
+
+            // ask remains untouched in the top and there's no bid in the book
+            assert_eq!(orderbook.peek_top(&OrderSide::Ask), Some(&ask_080_at_015));
+            assert_eq!(orderbook.peek_top(&OrderSide::Bid), None);
+
+            // now confirm that with another ask then the bid could be filled
+            assert!(bid_099_at_015.remaining() < (ask_080_at_015.remaining() + ask_100_at_015.remaining()));
+            assert!(bid_099_at_015.matches(&ask_100_at_015));
+
+            // this is the amount that should be left in the asks
+            let ask_remaining = ask_080_at_015.remaining() + ask_100_at_015.remaining() - bid_099_at_015.remaining();
+
+            // send to the book, there should be matching
+            assert_eq!(orderbook.handle_create(ask_100_at_015), NOT_MATCHED);
+            assert_eq!(orderbook.handle_create(bid_099_at_015), MATCHED);
+
+            // there's been a matching across two levels; there's no bid in the book
+            assert_eq!(orderbook.peek_top(&OrderSide::Ask).unwrap().remaining(), ask_remaining);
+            assert_eq!(orderbook.peek_top(&OrderSide::Bid), None);
+        }
+
+        #[rstest]
         fn cancel_post_only(mut orderbook: Orderbook, ask_100_at_015: Order, bid_099_at_015: Order) {
             // keep the original limit price
             let limit_price = bid_099_at_015.limit_price().unwrap();
@@ -555,8 +663,8 @@ mod test {
             assert!(!bid_099_at_015.is_closed());
 
             // send to the book, there should be no matching
-            assert!(orderbook.handle_create(ask_100_at_015).is_ok());
-            assert!(orderbook.handle_create(bid_099_at_015).is_ok());
+            assert_eq!(orderbook.handle_create(ask_100_at_015), NOT_MATCHED);
+            assert_eq!(orderbook.handle_create(bid_099_at_015), NOT_MATCHED);
 
             // ask remains untouched in the top and there's no bid in the book
             assert_eq!(orderbook.peek_top(&OrderSide::Ask), Some(&ask_100_at_015));
@@ -568,21 +676,21 @@ mod test {
             // keep the original limit price
             let limit_price = bid_099_at_015.limit_price().unwrap();
 
-            // mutate incoming order to make it immediate or cancel
+            // mutate incoming order to make it IOC
             let mut bid_099_at_015 = bid_099_at_015;
             bid_099_at_015.mutate_type(OrderType::Limit {
                 limit_price,
-                time_in_force: TimeInForce::ImmediateOrCancel { all_or_none: false },
+                time_in_force: TimeInForce::ImmediateOrCancel { fill_or_kill: false },
             });
 
-            // confirm is immediate or cancel, it matches and is not closed
+            // confirm is IOC, it matches and is not closed
             assert!(bid_099_at_015.is_immediate_or_cancel());
             assert!(bid_099_at_015.matches(&ask_080_at_015));
             assert!(!bid_099_at_015.is_closed());
 
-            // send to the book, there should be no matching
-            assert!(orderbook.handle_create(ask_080_at_015).is_ok());
-            assert!(orderbook.handle_create(bid_099_at_015).is_ok());
+            // send to the book, there should be matching
+            assert_eq!(orderbook.handle_create(ask_080_at_015), NOT_MATCHED);
+            assert_eq!(orderbook.handle_create(bid_099_at_015), MATCHED);
 
             // the ask is filled and the remaining bid doesn't remain in the book
             assert_eq!(orderbook.peek_top(&OrderSide::Ask), None);

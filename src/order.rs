@@ -105,7 +105,7 @@ pub enum OrderType {
 
     Market {
         #[serde(default, skip_serializing_if = "core::ops::Not::not")]
-        all_or_none: bool,
+        fill_or_kill: bool,
     },
 }
 
@@ -120,7 +120,7 @@ pub enum TimeInForce {
     #[serde(rename = "IOC")]
     ImmediateOrCancel {
         #[serde(default, skip_serializing_if = "core::ops::Not::not")]
-        all_or_none: bool,
+        fill_or_kill: bool,
     },
 }
 
@@ -175,7 +175,7 @@ impl Order {
             id,
             side,
             type_: OrderType::Market {
-                all_or_none: Default::default(),
+                fill_or_kill: Default::default(),
             },
             order_quantity: quantity,
             filled_quantity: 0.into(),
@@ -319,7 +319,7 @@ impl Display for Order {
 }
 
 pub trait OrderFeatures {
-    fn is_all_or_none(&self) -> bool;
+    fn is_fill_or_kill(&self) -> bool;
 
     fn is_immediate_or_cancel(&self) -> bool;
 
@@ -327,13 +327,13 @@ pub trait OrderFeatures {
 }
 
 impl OrderFeatures for Order {
-    fn is_all_or_none(&self) -> bool {
+    fn is_fill_or_kill(&self) -> bool {
         matches!(
             self.type_,
             OrderType::Limit {
-                time_in_force: TimeInForce::ImmediateOrCancel { all_or_none: true },
+                time_in_force: TimeInForce::ImmediateOrCancel { fill_or_kill: true },
                 ..
-            } | OrderType::Market { all_or_none: true }
+            } | OrderType::Market { fill_or_kill: true }
         )
     }
 
@@ -529,31 +529,31 @@ mod test {
         }
 
         #[rstest]
-        fn is_all_or_none(ask_070_at_market: Order, bid_040_at_013: Order) {
+        fn is_fill_or_kill(ask_070_at_market: Order, bid_040_at_013: Order) {
             // this market order is not FOK by default, first confirm that then mutate to make it FOK
             let mut market_order = ask_070_at_market;
-            assert!(!market_order.is_all_or_none());
+            assert!(!market_order.is_fill_or_kill());
 
-            let fok = OrderType::Market { all_or_none: true };
+            let fok = OrderType::Market { fill_or_kill: true };
             market_order.type_ = fok;
-            assert!(market_order.is_all_or_none());
+            assert!(market_order.is_fill_or_kill());
 
             // this limit order is not FOK by default, first confirm that then mutate to make it FOK
             let mut limit_order = bid_040_at_013;
-            assert!(!limit_order.is_all_or_none());
+            assert!(!limit_order.is_fill_or_kill());
 
-            let fok = TimeInForce::ImmediateOrCancel { all_or_none: true };
+            let fok = TimeInForce::ImmediateOrCancel { fill_or_kill: true };
             limit_order.type_ = OrderType::Limit {
                 limit_price: Decimal::ZERO,
                 time_in_force: fok,
             };
-            assert!(limit_order.is_all_or_none());
+            assert!(limit_order.is_fill_or_kill());
         }
 
         #[rstest]
         fn is_post_only(ask_070_at_market: Order, bid_040_at_013: Order) {
             // market orders cannot be GTC
-            assert_eq!(ask_070_at_market.type_, OrderType::Market { all_or_none: false });
+            assert_eq!(ask_070_at_market.type_, OrderType::Market { fill_or_kill: false });
             assert!(!ask_070_at_market.is_post_only());
 
             // this limit order is not GTC by default, first confirm that then mutate to make it GTC
@@ -580,14 +580,14 @@ mod test {
         #[rstest]
         fn is_immediate_or_cancel(ask_070_at_market: Order, bid_040_at_013: Order) {
             // market orders are IOC
-            assert_eq!(ask_070_at_market.type_, OrderType::Market { all_or_none: false });
+            assert_eq!(ask_070_at_market.type_, OrderType::Market { fill_or_kill: false });
             assert!(ask_070_at_market.is_immediate_or_cancel());
 
             // this limit order is not IOC by default, first confirm that then mutate to make it IOC
             let mut limit_order = bid_040_at_013;
             assert!(!limit_order.is_immediate_or_cancel());
 
-            let ioc = TimeInForce::ImmediateOrCancel { all_or_none: false };
+            let ioc = TimeInForce::ImmediateOrCancel { fill_or_kill: false };
             limit_order.type_ = OrderType::Limit {
                 limit_price: Decimal::ZERO,
                 time_in_force: ioc,

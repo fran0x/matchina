@@ -1,9 +1,8 @@
 [package]
-name = "exchange"
+name = "merx"
 version = "0.1.0"
 edition = "2021"
-default-run = "exchange"
-license = "MIT"
+default-run = "merx"
 
 [dependencies]
 anyhow = "1.0.75"
