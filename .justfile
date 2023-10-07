@@ -33,3 +33,5 @@ gen:
 run:
     cargo run --release --bin generator | RUST_LOG=info cargo run --release
 
+data:
+    cargo run --release --bin generator
