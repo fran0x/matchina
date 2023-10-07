@@ -131,7 +131,6 @@ type BidsLadder = LadderWrapper<BTreeMap<Reverse<OrderPrice>, PriceLevel>>;
 
 #[derive(Debug)]
 pub struct PriceLevel {
-    //order_ids: VecDeque<OrderId>,
     orders: VecDeque<Order>,
     quantity: OrderQuantity,
     price: OrderPrice,
@@ -140,7 +139,6 @@ pub struct PriceLevel {
 impl PriceLevel {
     fn new(price: OrderPrice) -> Self {
         Self {
-            //order_ids: VecDeque::with_capacity(DEFAULT_LEVEL_SIZE),
             orders: VecDeque::with_capacity(DEFAULT_LEVEL_SIZE),
             quantity: Decimal::ZERO,
             price,
@@ -245,11 +243,9 @@ macro_rules! match_order {
             let mut total_traded = OrderQuantity::ZERO;
             let mut orders_completed = 0;
 
-            for maker_order in price_level.iter_mut() {
-                let maker = maker_order;
-                // let test = $orders
-                //     .get_mut(order_id)
-                //     .ok_or(OrderbookError::OrderToMatchNotFound(*order_id))?;
+            for maker in price_level.iter_mut() {
+               // let maker = maker_order;
+      
                 let traded = $incoming_order.can_trade(maker);
 
                 let trade = Trade::new(&mut $incoming_order, maker, traded).map_err(OrderbookError::TradeError)?;

@@ -1,12 +1,35 @@
 use std::io;
 use std::io::Write;
 use std::fs::File;
+use std::path::Path;
 use std::io::{BufRead, BufReader};
 use anyhow::Result;
 use merx::order::OrderRequest;
+use merx::order::util::generate;
 
 fn main() -> Result<()> {
     let mut stdout = io::stdout();
+
+    let input_exists = Path::new("./orders.json").try_exists();
+
+    match input_exists {
+        Ok(true) => {
+            // Do nothing, continue with the code
+        }
+        Ok(false) => {
+            let range = 1..=10_000_000;
+            let mut file = File::create("./orders.json")?;
+
+            for order in generate(range) {
+                let order = serde_json::to_string(&order).ok().unwrap();
+                writeln!(file, "{}", order)?;
+            }
+        }
+        Err(_) => {
+            // Error handling
+        }
+    }
+
     let input = File::open("./orders.json")?;
     let reader = BufReader::new(input);
 
