@@ -7,30 +7,16 @@ use anyhow::Result;
 use merx::order::OrderRequest;
 use merx::order::util::generate;
 
+const FILE_PATH: &str = "./orders.json";
+
 fn main() -> Result<()> {
-    let mut stdout = io::stdout();
-
-    let input_exists = Path::new("./orders.json").try_exists();
-
-    match input_exists {
-        Ok(true) => {
-            // Do nothing, continue with the code
-        }
-        Ok(false) => {
-            let range = 1..=10_000_000;
-            let mut file = File::create("./orders.json")?;
-
-            for order in generate(range) {
-                let order = serde_json::to_string(&order).ok().unwrap();
-                writeln!(file, "{}", order)?;
-            }
-        }
-        Err(_) => {
-            // Error handling
-        }
+    if !Path::new(FILE_PATH).exists() {
+        generate_and_write_orders()?;
     }
 
-    let input = File::open("./orders.json")?;
+    let mut stdout = io::stdout();
+
+    let input = File::open(FILE_PATH)?;
     let reader = BufReader::new(input);
 
     let mut orders: Vec<OrderRequest> = Vec::new();
@@ -47,6 +33,18 @@ fn main() -> Result<()> {
         let order_json = serde_json::to_string(&order)?;
 
         writeln!(stdout, "{}", order_json)?;
+    }
+
+    Ok(())
+}
+
+fn generate_and_write_orders() -> io::Result<()> {
+    let range = 1..=10_000_000;
+    let mut file = File::create(FILE_PATH)?;
+
+    for order in generate(range) {
+        let order = serde_json::to_string(&order).ok().unwrap();
+        writeln!(file, "{}", order)?;
     }
 
     Ok(())
