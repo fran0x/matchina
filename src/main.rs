@@ -9,7 +9,7 @@ use anyhow::Result;
 use clap::Parser;
 use compact_str::CompactString;
 use crossbeam_channel::unbounded;
-use matchine::{
+use matchina::{
     engine::Engine,
     order::{util::DEFAULT_PAIR, OrderRequest},
     summary::compute,
