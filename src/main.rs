@@ -94,7 +94,10 @@ fn main() -> Result<()> {
             let summary = compute(orderbook);
             info!("{summary}");
         }
-        Output::File(..) => unimplemented!(),
+        Output::File(path) => {
+            info!("{:?}", path);
+            unimplemented!()
+        }
     }
 
     Ok(())
