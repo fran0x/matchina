@@ -1,8 +1,15 @@
 [package]
 name = "merx"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
-default-run = "merx"
+license = "MIT"
+description = "Minimalistic matching engine designed for a crypto exchange"
+readme = "./README.md"
+documentation = "https://docs.rs/merx-rx"
+repository = "https://github.com/frank-lpz/merx-rs"
+keywords = ["matching-engine"]
+categories = ["crypto", "finance", "trading"]
+rust-version = "1.77.0"
 
 [dependencies]
 anyhow = "1.0.75"
