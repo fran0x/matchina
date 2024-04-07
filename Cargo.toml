@@ -1,14 +1,14 @@
 [package]
-name = "merx-rs"
+name = "matchine"
 version = "0.1.2"
 edition = "2021"
 license = "MIT"
-description = "Minimalistic matching engine designed for a crypto exchange"
+description = "Minimalistic matching engine designed for a trading exchange"
 readme = "./README.md"
 documentation = "https://docs.rs/merx-rx"
 repository = "https://github.com/frank-lpz/merx-rs"
 keywords = ["matching-engine"]
-categories = ["crypto", "finance", "trading"]
+categories = ["finance", "trading"]
 rust-version = "1.77.0"
 
 [dependencies]

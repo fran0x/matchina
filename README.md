@@ -14,7 +14,7 @@
 
 # merx-rs
 
-This is a minimalistic matching engine designed for a crypto exchange. It supports various order types including limit orders, market orders, and order features such as Immediate-Or-Cancel (IOC), Fill-Or-Kill (FOK), and Post-Only orders.
+This is a minimalistic matching engine designed for a trading exchange. It supports various order types including limit orders, market orders, and order features such as Immediate-Or-Cancel (IOC), Fill-Or-Kill (FOK), and Post-Only orders.
 
 ## Features
 
@@ -45,5 +45,4 @@ Feel free to submit bug reports, feature requests, or even pull requests to enha
 
 ## License
 
-This project is licensed under the MIT License.
-
+This project is licensed under the [MIT License](LICENSE).

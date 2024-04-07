@@ -2,7 +2,7 @@ use std::io;
 use std::io::Write;
 
 use anyhow::Result;
-use merx::order::util::generate;
+use matchine::order::util::generate;
 
 fn main() -> Result<()> {
     let mut stdout = io::stdout();
