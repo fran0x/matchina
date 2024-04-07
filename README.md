@@ -1,13 +1,13 @@
-[![Build Badge]][actions] [![Crates Badge]][crates] [![Docs Badge]][docs] [![License Badge]][license]
+[![Build Badge]][build] [![Crates Badge]][crates] [![Docs Badge]][docs] [![License Badge]][license]
 
 [Build Badge]: https://img.shields.io/endpoint.svg?url=https%3A%2F%2Factions-badge.atrox.dev%2Ffrank-lpz%2Fmerx-rs%2Fbadge%3Fref%3Dmain&style=flat&label=build
 [build]: https://actions-badge.atrox.dev/frank-lpz/merx-rs/goto?ref=main
 
-[Crates Badge]: https://img.shields.io/crates/v/merx.svg
-[crates]: https://crates.io/crates/merx
+[Crates Badge]: https://img.shields.io/crates/v/merx-rs.svg
+[crates]: https://crates.io/crates/merx-rs
 
-[Docs Badge]: https://docs.rs/merx/badge.svg
-[docs]: https://docs.rs/merx
+[Docs Badge]: https://docs.rs/merx-rs/badge.svg
+[docs]: https://docs.rs/merx-rs
 
 [License Badge]: https://img.shields.io/badge/License-MIT-blue.svg
 [license]: LICENSE
