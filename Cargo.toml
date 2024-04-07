@@ -17,7 +17,7 @@ clap = { version = "4.4.2", features = ["derive"] }
 compact_str = { version = "0.7.1", features = ["serde"] }
 core_affinity = "0.8.1"
 crossbeam-channel = "0.5.8"
-indexmap = "2.0.0"
+indexmap = "2.2.6"
 num = "0.4.1"
 rand = "0.8.5"
 rust_decimal = "1.32.0"

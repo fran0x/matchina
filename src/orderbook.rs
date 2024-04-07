@@ -261,7 +261,7 @@ macro_rules! match_order {
 
             price_level.quantity -= total_traded;
             for _ in 0..orders_completed {
-                price_level.pop_front().and_then(|order_id| $orders.remove(& order_id));
+                price_level.pop_front().and_then(|order_id| $orders.swap_remove(& order_id));
             }
 
             if price_level.quantity == OrderQuantity::ZERO {
@@ -345,7 +345,7 @@ impl Orderbook {
     pub fn handle_cancel(&mut self, order_id: OrderId) -> CancelResult {
         let order = self
             .orders
-            .remove(&order_id)
+            .swap_remove(&order_id)
             .ok_or(OrderbookError::OrderToCancelNotFound(order_id))?;
 
         match order.side() {
