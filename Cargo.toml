@@ -6,9 +6,9 @@ license = "MIT"
 description = "Minimalistic matching engine designed for a trading exchange"
 readme = "./README.md"
 documentation = "https://docs.rs/matchina"
-repository = "https://github.com/frank-leap/matchina"
+repository = "https://github.com/fran0x/matchina"
 keywords = ["matching-engine"]
-categories = ["finance", "trading"]
+categories = ["finance", "cryptography::cryptocurrencies"]
 rust-version = "1.96.0"
 
 [dependencies]
