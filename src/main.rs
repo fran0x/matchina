@@ -11,13 +11,13 @@ use compact_str::CompactString;
 use crossbeam_channel::unbounded;
 use matchina::{
     engine::Engine,
-    order::{util::DEFAULT_PAIR, OrderRequest},
+    order::{OrderRequest, util::DEFAULT_PAIR},
     summary::compute,
 };
 use tracing::{error, info};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_log::LogTracer;
-use tracing_subscriber::{fmt, prelude::*, EnvFilter, Layer, Registry};
+use tracing_subscriber::{EnvFilter, Layer, Registry, fmt, prelude::*};
 
 #[derive(Parser)]
 #[clap(author, version, about)]

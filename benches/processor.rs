@@ -1,7 +1,7 @@
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{BatchSize, Criterion, black_box, criterion_group, criterion_main};
 use matchina::{
     engine::Engine,
-    order::util::{generate, DEFAULT_PAIR},
+    order::util::{DEFAULT_PAIR, generate},
 };
 
 pub fn process(c: &mut Criterion) {

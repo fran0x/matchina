@@ -1,6 +1,6 @@
 use std::{
     cmp::Reverse,
-    collections::{btree_map::Entry, BTreeMap, VecDeque},
+    collections::{BTreeMap, VecDeque, btree_map::Entry},
     fmt::Display,
     ops::{Deref, DerefMut},
 };
@@ -243,6 +243,10 @@ macro_rules! match_order {
             let mut orders_completed = 0;
 
             for order_id in price_level.iter_mut() {
+                if $incoming_order.is_closed() {
+                    break;
+                }
+
                 let maker = $orders
                     .get_mut(order_id)
                     .ok_or(OrderbookError::OrderToMatchNotFound(*order_id))?;
@@ -588,6 +592,21 @@ mod test {
                 None => panic!(),
             }
             assert_eq!(orderbook.peek_top(&OrderSide::Ask), None);
+        }
+
+        #[rstest]
+        fn stop_matching_price_level_when_taker_is_filled(mut orderbook: Orderbook) {
+            let first_bid = Order::limit_order(OrderId::new(1), OrderSide::Bid, 5.into(), 100.into());
+            let second_bid = Order::limit_order(OrderId::new(2), OrderSide::Bid, 5.into(), 100.into());
+            let ask = Order::limit_order(OrderId::new(3), OrderSide::Ask, 5.into(), 100.into());
+
+            assert_eq!(orderbook.handle_create(first_bid), NOT_MATCHED);
+            assert_eq!(orderbook.handle_create(second_bid), NOT_MATCHED);
+            assert_eq!(orderbook.handle_create(ask), MATCHED);
+
+            assert_eq!(orderbook.trades.len(), 1);
+            assert_eq!(orderbook.peek_top(&OrderSide::Bid), Some(&second_bid));
+            assert_eq!(orderbook.peek_top(&OrderSide::Bid).unwrap().remaining(), 5.into());
         }
     }
 

@@ -368,8 +368,8 @@ pub enum OrderError {
 }
 
 pub mod util {
-    use compact_str::{format_compact, CompactString};
-    use rand::{rngs::ThreadRng, Rng};
+    use compact_str::{CompactString, format_compact};
+    use rand::{Rng, rngs::ThreadRng};
     use rust_decimal::Decimal;
 
     use super::{OrderRequest, OrderSide};
